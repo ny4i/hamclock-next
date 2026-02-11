@@ -8,7 +8,9 @@
 #include <filesystem>
 #include <fstream>
 
+#include <cctype> // For std::tolower
 #include <sstream>
+#include <unordered_map> // For header parsing
 
 static size_t writeCallback(char *ptr, size_t size, size_t nmemb,
                             void *userdata) {
@@ -17,35 +19,63 @@ static size_t writeCallback(char *ptr, size_t size, size_t nmemb,
   return size * nmemb;
 }
 
+static size_t headerCallback(char *ptr, size_t size, size_t nmemb,
+                             void *userdata) {
+  auto *headers =
+      static_cast<std::unordered_map<std::string, std::string> *>(userdata);
+  std::string line(ptr, size * nmemb);
+  auto colon = line.find(':');
+  if (colon != std::string::npos) {
+    std::string key = line.substr(0, colon);
+    std::string value = line.substr(colon + 1);
+
+    // Trim whitespace safely
+    auto first = value.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos) {
+      auto last = value.find_last_not_of(" \t\r\n");
+      value = value.substr(first, last - first + 1);
+    } else {
+      value.clear();
+    }
+
+    // Lowercase key for consistent lookup
+    for (auto &c : key)
+      c = std::tolower(c);
+    (*headers)[key] = value;
+  }
+  return size * nmemb;
+}
+
 // Basic in-memory cache to prevent accidental tight-loop fetches
 void NetworkManager::fetchAsync(const std::string &url,
                                 std::function<void(std::string)> callback,
                                 int cacheAgeSeconds, bool force) {
-  // Check cache first
-  if (!force) {
+  // Check memory cache first
+  CacheEntry cached;
+  bool hasCache = false;
+
+  {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     auto it = cache_.find(url);
     if (it != cache_.end()) {
-      std::time_t now = std::time(nullptr);
-      if (now - it->second.timestamp < cacheAgeSeconds) {
-        // Return cached copy immediately (on calling thread? Or async?
-        // Async is safer to avoid blocking UI if callback does heavy work,
-        // but for now let's just callback directly to keep it simple,
-        // assuming callback is fast or posts to main thread).
-        // To be safe and consistent with "Async", we should probably spawn a
-        // thread or post a task. But for this simple manager, direct callback
-        // is okay provided the caller handles it. However, the caller expects
-        // async. Let's spawn a quick thread to invoke callback.
-        std::string data = it->second.data;
-        std::thread([cb = std::move(callback), data = std::move(data)]() {
-          cb(data);
-        }).detach();
-        return;
-      }
+      cached = it->second;
+      hasCache = true;
     }
   }
 
-  std::thread([this, url, callback = std::move(callback)]() {
+  if (hasCache && !force) {
+    std::time_t now = std::time(nullptr);
+    if (now - cached.timestamp < cacheAgeSeconds) {
+      std::fprintf(stderr, "NetworkManager: memory cache hit for %s\n",
+                   url.c_str());
+      std::thread([cb = std::move(callback), data = cached.data]() {
+        cb(data);
+      }).detach();
+      return;
+    }
+  }
+
+  std::thread([this, url, callback = std::move(callback), hasCache, cached]() {
     CURL *curl = curl_easy_init();
     if (!curl) {
       std::fprintf(stderr, "NetworkManager: curl_easy_init failed\n");
@@ -53,15 +83,49 @@ void NetworkManager::fetchAsync(const std::string &url,
       return;
     }
 
-    std::string response;
+    std::unordered_map<std::string, std::string> headers;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    // Pretend to be a browser to avoid some strict anti-bot filters
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "HamClock-Next/1.0");
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &headers);
 
+    // If we have cache, do a HEAD request first to verify
+    if (hasCache && !cached.lastModified.empty()) {
+      curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+      CURLcode res = curl_easy_perform(curl);
+      if (res == CURLE_OK) {
+        long responseCode = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
+        if (responseCode >= 200 && responseCode < 300) {
+          if (headers.count("last-modified") &&
+              headers.at("last-modified") == cached.lastModified) {
+            std::fprintf(stderr,
+                         "NetworkManager: cache validated (HEAD) for %s\n",
+                         url.c_str());
+            // Still valid! Update timestamp and return cached
+            {
+              std::lock_guard<std::mutex> lock(cacheMutex_);
+              cache_[url].timestamp = std::time(nullptr);
+              saveToDisk(url, cache_[url]);
+            }
+            curl_easy_cleanup(curl);
+            callback(cached.data);
+            return;
+          }
+        }
+      }
+      // Reset for full GET if HEAD failed or was different
+      curl_easy_setopt(curl, CURLOPT_NOBODY, 0L);
+    }
+
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    std::fprintf(stderr, "NetworkManager: fetching from network: %s\n",
+                 url.c_str());
     CURLcode res = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
 
@@ -76,10 +140,15 @@ void NetworkManager::fetchAsync(const std::string &url,
     {
       std::lock_guard<std::mutex> lock(cacheMutex_);
       std::time_t now = std::time(nullptr);
-      CacheEntry entry = {response, now};
-      cache_[url] = entry;
+      CacheEntry entry;
+      entry.data = response;
+      entry.timestamp = now;
+      if (headers.count("last-modified"))
+        entry.lastModified = headers.at("last-modified");
+      if (headers.count("etag"))
+        entry.etag = headers.at("etag");
 
-      // Persist to disk if cache dir is set
+      cache_[url] = entry;
       if (!cacheDir_.empty()) {
         saveToDisk(url, entry);
       }
@@ -123,8 +192,12 @@ void NetworkManager::saveToDisk(const std::string &url,
   std::filesystem::path p = cacheDir_ / filename;
   std::ofstream ofs(p, std::ios::binary);
   if (ofs) {
+    // Write a simple header
+    ofs << "HamClockCache/1.0\n";
     ofs << entry.timestamp << "\n";
     ofs << url << "\n";
+    ofs << entry.lastModified << "\n";
+    ofs << entry.etag << "\n";
     ofs << entry.data;
   }
 }
@@ -139,17 +212,32 @@ void NetworkManager::loadCache() {
       if (ifs) {
         std::string line;
         if (std::getline(ifs, line)) {
-          try {
-            std::time_t ts = std::stoll(line);
-            std::string url;
-            if (std::getline(ifs, url)) {
-              // Read rest of file
-              std::string data((std::istreambuf_iterator<char>(ifs)),
-                               (std::istreambuf_iterator<char>()));
+          if (line != "HamClockCache/1.0")
+            continue; // Skip old/invalid
 
-              std::lock_guard<std::mutex> lock(cacheMutex_);
-              cache_[url] = {data, ts};
-            }
+          try {
+            if (!std::getline(ifs, line))
+              continue;
+            std::time_t ts = std::stoll(line);
+
+            std::string url;
+            if (!std::getline(ifs, url))
+              continue;
+
+            std::string lm;
+            if (!std::getline(ifs, lm))
+              continue;
+
+            std::string etag;
+            if (!std::getline(ifs, etag))
+              continue;
+
+            // Read rest of file as data
+            std::string data((std::istreambuf_iterator<char>(ifs)),
+                             (std::istreambuf_iterator<char>()));
+
+            std::lock_guard<std::mutex> lock(cacheMutex_);
+            cache_[url] = {data, ts, lm, etag};
           } catch (...) {
           }
         }

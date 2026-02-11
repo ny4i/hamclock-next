@@ -28,4 +28,14 @@ void drawCircleOutline(SDL_Renderer *renderer, float x, float y, float radius,
 void drawPolyline(SDL_Renderer *renderer, const SDL_FPoint *points, int count,
                   float thickness, SDL_Color color, bool closed = false);
 
+// Draw a textured thick line for anti-aliasing.
+void drawThickLineTextured(SDL_Renderer *renderer, SDL_Texture *tex, float x1,
+                           float y1, float x2, float y2, float thickness,
+                           SDL_Color color);
+
+// Draw a textured polyline for anti-aliasing.
+void drawPolylineTextured(SDL_Renderer *renderer, SDL_Texture *tex,
+                          const SDL_FPoint *points, int count, float thickness,
+                          SDL_Color color, bool closed = false);
+
 } // namespace RenderUtils

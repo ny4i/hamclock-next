@@ -3,18 +3,22 @@
 #include "../core/HamClockState.h"
 #include "../core/LiveSpotData.h"
 #include "../core/OrbitPredictor.h"
+#include "../network/NetworkManager.h"
 #include "TextureManager.h"
 #include "Widget.h"
 
 #include <SDL2/SDL.h>
 
 #include <memory>
+#include <mutex>
+#include <string>
 
 class MapWidget : public Widget {
 public:
   MapWidget(int x, int y, int w, int h, TextureManager &texMgr,
-            std::shared_ptr<HamClockState> state)
-      : Widget(x, y, w, h), texMgr_(texMgr), state_(std::move(state)) {}
+            NetworkManager &netMgr, std::shared_ptr<HamClockState> state)
+      : Widget(x, y, w, h), texMgr_(texMgr), netMgr_(netMgr),
+        state_(std::move(state)) {}
 
   ~MapWidget() override = default;
 
@@ -33,7 +37,7 @@ public:
   }
 
 private:
-  SDL_Point latLonToScreen(double lat, double lon) const;
+  SDL_FPoint latLonToScreen(double lat, double lon) const;
   void recalcMapRect();
   void renderNightOverlay(SDL_Renderer *renderer);
   void renderGreatCircle(SDL_Renderer *renderer);
@@ -48,12 +52,17 @@ private:
   void renderSpotOverlay(SDL_Renderer *renderer);
 
   TextureManager &texMgr_;
+  NetworkManager &netMgr_;
   std::shared_ptr<HamClockState> state_;
   std::shared_ptr<LiveSpotDataStore> spotStore_;
   OrbitPredictor *predictor_ = nullptr;
 
   SDL_Rect mapRect_ = {};
   bool mapLoaded_ = false;
+  int currentMonth_ = 0; // 1-12
+
+  std::mutex mapDataMutex_;
+  std::string pendingMapData_;
 
   double sunLat_ = 0;
   double sunLon_ = 0;

@@ -11,6 +11,7 @@
 #include "services/RSSProvider.h"
 #include "ui/DXSatPane.h"
 #include "ui/DebugOverlay.h"
+#include "ui/EmbeddedFont.h"
 #include "ui/FontCatalog.h"
 #include "ui/FontManager.h"
 #include "ui/LayoutManager.h"
@@ -33,7 +34,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <memory>
 #include <vector>
 
@@ -44,8 +44,6 @@ static constexpr int LOGICAL_HEIGHT = 480;
 static constexpr int FRAME_DELAY_MS = 10;
 static constexpr bool FIDELITY_MODE = true;
 
-static constexpr const char *FONT_PATH = "assets/font.ttf";
-static constexpr const char *LEGACY_CONFIG_PATH = "assets/config.json";
 static constexpr int FONT_SIZE = 24;
 
 int main(int /*argc*/, char * /*argv*/[]) {
@@ -58,28 +56,8 @@ int main(int /*argc*/, char * /*argv*/[]) {
     std::fprintf(stderr, "Warning: could not resolve config path\n");
     needSetup = true;
   } else if (!cfgMgr.load(appCfg)) {
-    // No config at ~/.config/hamclock/ — try migrating from legacy
-    // assets/config.json
-    std::ifstream ifs(LEGACY_CONFIG_PATH);
-    if (ifs) {
-      auto legacy = nlohmann::json::parse(ifs, nullptr, false);
-      if (!legacy.is_discarded()) {
-        appCfg.callsign = legacy.value("callsign", "");
-        appCfg.grid = legacy.value("grid", "");
-        if (!appCfg.callsign.empty() && !appCfg.grid.empty()) {
-          Astronomy::gridToLatLon(appCfg.grid, appCfg.lat, appCfg.lon);
-          cfgMgr.save(appCfg);
-          std::fprintf(stderr, "Migrated config to %s\n",
-                       cfgMgr.configPath().c_str());
-        } else {
-          needSetup = true;
-        }
-      } else {
-        needSetup = true;
-      }
-    } else {
-      needSetup = true;
-    }
+    // No config at ~/.config/hamclock/ — needs setup
+    needSetup = true;
   }
 
   // --- Init SDL2 (needed before setup screen) ---
@@ -197,7 +175,8 @@ int main(int /*argc*/, char * /*argv*/[]) {
     // --- Run setup screen if needed (first run or gear icon click) ---
     if (needSetup) {
       FontManager setupFontMgr;
-      setupFontMgr.load(FONT_PATH, FONT_SIZE);
+      setupFontMgr.loadFromMemory(assets_font_ttf, assets_font_ttf_len,
+                                  FONT_SIZE);
 
       int setupW = FIDELITY_MODE ? LOGICAL_WIDTH : 0;
       int setupH = FIDELITY_MODE ? LOGICAL_HEIGHT : 0;
@@ -312,7 +291,8 @@ int main(int /*argc*/, char * /*argv*/[]) {
     // setup.
     {
       FontManager fontMgr;
-      if (!fontMgr.load(FONT_PATH, FONT_SIZE)) {
+      if (!fontMgr.loadFromMemory(assets_font_ttf, assets_font_ttf_len,
+                                  FONT_SIZE)) {
         std::fprintf(stderr, "Warning: text rendering disabled\n");
       }
 
@@ -403,7 +383,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
 
       // --- Side Panel widgets (2 panes) ---
       LocalPanel localPanel(0, 0, 0, 0, fontMgr, state);
-      DXSatPane dxSatPane(0, 0, 0, 0, fontMgr, state, satMgr);
+      DXSatPane dxSatPane(0, 0, 0, 0, fontMgr, texMgr, state, satMgr);
       dxSatPane.setObserver(appCfg.lat, appCfg.lon);
       dxSatPane.restoreState(appCfg.panelMode, appCfg.selectedSatellite);
       dxSatPane.setOnModeChanged(
@@ -415,7 +395,7 @@ int main(int /*argc*/, char * /*argv*/[]) {
           });
 
       // --- Main Stage ---
-      MapWidget mapArea(0, 0, 0, 0, texMgr, state);
+      MapWidget mapArea(0, 0, 0, 0, texMgr, netManager, state);
       mapArea.setSpotStore(spotStore);
       RSSBanner rssBanner(139, 412, 660, 68, fontMgr, rssStore);
 

@@ -6,6 +6,7 @@
 #include "DXPanel.h"
 #include "FontManager.h"
 #include "SatPanel.h"
+#include "TextureManager.h"
 #include "Widget.h"
 
 #include <functional>
@@ -18,7 +19,8 @@ public:
   enum class Mode { DX, SAT };
 
   DXSatPane(int x, int y, int w, int h, FontManager &fontMgr,
-            std::shared_ptr<HamClockState> state, SatelliteManager &satMgr);
+            TextureManager &texMgr, std::shared_ptr<HamClockState> state,
+            SatelliteManager &satMgr);
   ~DXSatPane() override;
 
   // Set observer location for orbit predictions.
@@ -76,6 +78,7 @@ private:
   int menuPad() const;
 
   FontManager &fontMgr_;
+  TextureManager &texMgr_;
   std::shared_ptr<HamClockState> state_;
   SatelliteManager &satMgr_;
 

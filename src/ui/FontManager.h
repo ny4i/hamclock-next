@@ -26,14 +26,16 @@ public:
   FontManager(const FontManager &) = delete;
   FontManager &operator=(const FontManager &) = delete;
 
-  bool load(const char *path, int defaultPtSize) {
+  bool loadFromMemory(const unsigned char *data, unsigned int size,
+                      int defaultPtSize) {
     closeAll();
-    path_ = path;
+    data_ = data;
+    size_ = size;
     defaultSize_ = defaultPtSize;
     return getFont(defaultPtSize) != nullptr;
   }
 
-  bool ready() const { return !path_.empty(); }
+  bool ready() const { return data_ != nullptr; }
 
   // Get a font at the requested point size (cached).
   TTF_Font *getFont(int ptSize) {
@@ -42,10 +44,18 @@ public:
     if (it != cache_.end())
       return it->second;
 
-    TTF_Font *font = TTF_OpenFont(path_.c_str(), ptSize);
+    if (!data_)
+      return nullptr;
+
+    SDL_RWops *rw = SDL_RWFromConstMem(data_, size_);
+    if (!rw)
+      return nullptr;
+
+    TTF_Font *font = TTF_OpenFontRW(rw, 1, ptSize); // 1 = auto-close rw
     if (!font) {
-      std::fprintf(stderr, "FontManager: failed to open %s at %dpt: %s\n",
-                   path_.c_str(), ptSize, TTF_GetError());
+      std::fprintf(stderr,
+                   "FontManager: failed to open embedded font at %dpt: %s\n",
+                   ptSize, TTF_GetError());
       return nullptr;
     }
     cache_[ptSize] = font;
@@ -132,7 +142,8 @@ private:
     cache_.clear();
   }
 
-  std::string path_;
+  const unsigned char *data_ = nullptr;
+  unsigned int size_ = 0;
   int defaultSize_ = 24;
   float renderScale_ = 1.0f;
   std::map<int, TTF_Font *> cache_;

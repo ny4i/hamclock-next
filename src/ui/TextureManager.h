@@ -3,102 +3,239 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <string>
 
 class TextureManager {
 public:
-    TextureManager() = default;
-    ~TextureManager() {
-        for (auto& [key, tex] : cache_) SDL_DestroyTexture(tex);
+  TextureManager() = default;
+  ~TextureManager() {
+    for (auto &[key, tex] : cache_)
+      SDL_DestroyTexture(tex);
+  }
+
+  TextureManager(const TextureManager &) = delete;
+  TextureManager &operator=(const TextureManager &) = delete;
+
+  // Load a BMP texture from disk, cache by key. Returns nullptr on failure.
+  SDL_Texture *loadBMP(SDL_Renderer *renderer, const std::string &key,
+                       const std::string &path) {
+    auto it = cache_.find(key);
+    if (it != cache_.end())
+      return it->second;
+
+    SDL_Surface *surface = SDL_LoadBMP(path.c_str());
+    if (!surface) {
+      std::fprintf(stderr, "TextureManager: failed to load %s: %s\n",
+                   path.c_str(), SDL_GetError());
+      return nullptr;
+    }
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+    if (texture)
+      cache_[key] = texture;
+    return texture;
+  }
+
+  // Load any image (PNG, JPG, BMP, etc.) via SDL_image, cache by key.
+  SDL_Texture *loadImage(SDL_Renderer *renderer, const std::string &key,
+                         const std::string &path) {
+    auto it = cache_.find(key);
+    if (it != cache_.end())
+      return it->second;
+
+    SDL_Surface *surface = IMG_Load(path.c_str());
+    if (!surface) {
+      std::fprintf(stderr, "TextureManager: failed to load %s: %s\n",
+                   path.c_str(), IMG_GetError());
+      return nullptr;
+    }
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+    if (texture)
+      cache_[key] = texture;
+    return texture;
+  }
+
+  // Load an image from memory (e.g. bytes from NetworkManager).
+  SDL_Texture *loadFromMemory(SDL_Renderer *renderer, const std::string &key,
+                              const std::string &data) {
+    return loadFromMemory(renderer, key,
+                          reinterpret_cast<const unsigned char *>(data.data()),
+                          static_cast<unsigned int>(data.size()));
+  }
+
+  // Load an image from memory (e.g. embedded assets).
+  SDL_Texture *loadFromMemory(SDL_Renderer *renderer, const std::string &key,
+                              const unsigned char *data, unsigned int size) {
+    // If it already exists, destroy old one before replacing
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+      SDL_DestroyTexture(it->second);
+      cache_.erase(it);
     }
 
-    TextureManager(const TextureManager&) = delete;
-    TextureManager& operator=(const TextureManager&) = delete;
+    SDL_RWops *rw = SDL_RWFromConstMem(data, static_cast<int>(size));
+    if (!rw)
+      return nullptr;
 
-    // Load a BMP texture from disk, cache by key. Returns nullptr on failure.
-    SDL_Texture* loadBMP(SDL_Renderer* renderer, const std::string& key,
-                         const std::string& path) {
-        auto it = cache_.find(key);
-        if (it != cache_.end()) return it->second;
+    SDL_Surface *surface = IMG_Load_RW(rw, 1); // 1 = auto-close rw
+    if (!surface) {
+      std::fprintf(stderr, "TextureManager: failed to load from memory: %s\n",
+                   IMG_GetError());
+      return nullptr;
+    }
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_FreeSurface(surface);
+    if (texture)
+      cache_[key] = texture;
+    return texture;
+  }
 
-        SDL_Surface* surface = SDL_LoadBMP(path.c_str());
-        if (!surface) {
-            std::fprintf(stderr, "TextureManager: failed to load %s: %s\n",
-                         path.c_str(), SDL_GetError());
-            return nullptr;
-        }
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-        SDL_FreeSurface(surface);
-        if (texture) cache_[key] = texture;
-        return texture;
+  // Generate a procedural equirectangular Earth fallback (dark blue + grid
+  // lines).
+  SDL_Texture *generateEarthFallback(SDL_Renderer *renderer,
+                                     const std::string &key, int width,
+                                     int height) {
+    auto it = cache_.find(key);
+    if (it != cache_.end())
+      return it->second;
+
+    SDL_Texture *texture =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                          SDL_TEXTUREACCESS_TARGET, width, height);
+    if (!texture)
+      return nullptr;
+
+    SDL_SetRenderTarget(renderer, texture);
+
+    // Dark blue ocean
+    SDL_SetRenderDrawColor(renderer, 10, 20, 60, 255);
+    SDL_RenderClear(renderer);
+
+    // Grid lines every 30 degrees
+    SDL_SetRenderDrawColor(renderer, 40, 60, 100, 255);
+    for (int lonDeg = -180; lonDeg <= 180; lonDeg += 30) {
+      int px = static_cast<int>((lonDeg + 180.0) / 360.0 * width);
+      SDL_RenderDrawLine(renderer, px, 0, px, height);
+    }
+    for (int latDeg = -90; latDeg <= 90; latDeg += 30) {
+      int py = static_cast<int>((90.0 - latDeg) / 180.0 * height);
+      SDL_RenderDrawLine(renderer, 0, py, width, py);
     }
 
-    // Load any image (PNG, JPG, BMP, etc.) via SDL_image, cache by key.
-    SDL_Texture* loadImage(SDL_Renderer* renderer, const std::string& key,
-                           const std::string& path) {
-        auto it = cache_.find(key);
-        if (it != cache_.end()) return it->second;
+    // Equator in slightly brighter color
+    SDL_SetRenderDrawColor(renderer, 60, 90, 140, 255);
+    int eqY = height / 2;
+    SDL_RenderDrawLine(renderer, 0, eqY, width, eqY);
 
-        SDL_Surface* surface = IMG_Load(path.c_str());
-        if (!surface) {
-            std::fprintf(stderr, "TextureManager: failed to load %s: %s\n",
-                         path.c_str(), IMG_GetError());
-            return nullptr;
-        }
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-        SDL_FreeSurface(surface);
-        if (texture) cache_[key] = texture;
-        return texture;
+    // Prime meridian
+    int pmX = width / 2;
+    SDL_RenderDrawLine(renderer, pmX, 0, pmX, height);
+
+    SDL_SetRenderTarget(renderer, nullptr);
+    cache_[key] = texture;
+    return texture;
+  }
+
+  // Generate a 1x64 texture with a central alpha peak for anti-aliased lines.
+  SDL_Texture *generateLineTexture(SDL_Renderer *renderer,
+                                   const std::string &key) {
+    auto it = cache_.find(key);
+    if (it != cache_.end())
+      return it->second;
+
+    constexpr int h = 64;
+    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                             SDL_TEXTUREACCESS_STATIC, 1, h);
+    if (!texture)
+      return nullptr;
+
+    uint32_t pixels[h];
+    for (int i = 0; i < h; ++i) {
+      float y = (static_cast<float>(i) / (h - 1)) * 2.0f - 1.0f; // -1 to 1
+      float alpha = std::exp(-y * y * 8.0f); // Gaussian falloff
+      if (alpha < 1e-3f)
+        alpha = 0;
+      uint8_t a = static_cast<uint8_t>(alpha * 255.0f);
+      // RGBA8888: [R, G, B, A] in memory? SDL_BYTEORDER check would be better
+      // but usually 0xRRGGBBAA or 0xAABBGGRR.
+      // Let's use SDL_MapRGBA to be safe if we had a surface, but here we
+      // just want white.
+      pixels[i] = (0xFF << 24) | (0xFF << 16) | (0xFF << 8) | a;
     }
 
-    // Generate a procedural equirectangular Earth fallback (dark blue + grid lines).
-    SDL_Texture* generateEarthFallback(SDL_Renderer* renderer, const std::string& key,
-                                       int width, int height) {
-        auto it = cache_.find(key);
-        if (it != cache_.end()) return it->second;
+    SDL_UpdateTexture(texture, nullptr, pixels, 1 * sizeof(uint32_t));
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    cache_[key] = texture;
+    return texture;
+  }
 
-        SDL_Texture* texture = SDL_CreateTexture(
-            renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
-        if (!texture) return nullptr;
+  // Generate textures for markers (circle and square) with anti-aliased edges.
+  void generateMarkerTextures(SDL_Renderer *renderer) {
+    if (cache_.count("marker_circle") && cache_.count("marker_square"))
+      return;
 
-        SDL_SetRenderTarget(renderer, texture);
+    constexpr int sz = 64;
+    constexpr int center = sz / 2;
+    constexpr float r = sz / 2.0f - 2.0f;
 
-        // Dark blue ocean
-        SDL_SetRenderDrawColor(renderer, 10, 20, 60, 255);
-        SDL_RenderClear(renderer);
+    // 1. Circle Marker
+    SDL_Texture *circle = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                            SDL_TEXTUREACCESS_STATIC, sz, sz);
+    uint32_t *cPixels = new uint32_t[sz * sz];
+    for (int y = 0; y < sz; ++y) {
+      for (int x = 0; x < sz; ++x) {
+        float dx = x - center + 0.5f;
+        float dy = y - center + 0.5f;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        float alpha = 0.0f;
+        if (dist < r - 1.0f)
+          alpha = 1.0f;
+        else if (dist < r + 1.0f)
+          alpha = 1.0f - (dist - (r - 1.0f)) / 2.0f;
 
-        // Grid lines every 30 degrees
-        SDL_SetRenderDrawColor(renderer, 40, 60, 100, 255);
-        for (int lonDeg = -180; lonDeg <= 180; lonDeg += 30) {
-            int px = static_cast<int>((lonDeg + 180.0) / 360.0 * width);
-            SDL_RenderDrawLine(renderer, px, 0, px, height);
-        }
-        for (int latDeg = -90; latDeg <= 90; latDeg += 30) {
-            int py = static_cast<int>((90.0 - latDeg) / 180.0 * height);
-            SDL_RenderDrawLine(renderer, 0, py, width, py);
-        }
-
-        // Equator in slightly brighter color
-        SDL_SetRenderDrawColor(renderer, 60, 90, 140, 255);
-        int eqY = height / 2;
-        SDL_RenderDrawLine(renderer, 0, eqY, width, eqY);
-
-        // Prime meridian
-        int pmX = width / 2;
-        SDL_RenderDrawLine(renderer, pmX, 0, pmX, height);
-
-        SDL_SetRenderTarget(renderer, nullptr);
-        cache_[key] = texture;
-        return texture;
+        uint8_t a = static_cast<uint8_t>(alpha * 255.0f);
+        cPixels[y * sz + x] = (0xFF << 24) | (0xFF << 16) | (0xFF << 8) | a;
+      }
     }
+    SDL_UpdateTexture(circle, nullptr, cPixels, sz * sizeof(uint32_t));
+    SDL_SetTextureBlendMode(circle, SDL_BLENDMODE_BLEND);
+    cache_["marker_circle"] = circle;
+    delete[] cPixels;
 
-    SDL_Texture* get(const std::string& key) const {
-        auto it = cache_.find(key);
-        return it != cache_.end() ? it->second : nullptr;
+    // 2. Square Marker
+    SDL_Texture *square = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                                            SDL_TEXTUREACCESS_STATIC, sz, sz);
+    uint32_t *sPixels = new uint32_t[sz * sz];
+    for (int y = 0; y < sz; ++y) {
+      for (int x = 0; x < sz; ++x) {
+        float dx = std::abs(x - center + 0.5f);
+        float dy = std::abs(y - center + 0.5f);
+        float d = std::max(dx, dy);
+        float alpha = 0.0f;
+        if (d < r - 1.0f)
+          alpha = 1.0f;
+        else if (d < r + 1.0f)
+          alpha = 1.0f - (d - (r - 1.0f)) / 2.0f;
+
+        uint8_t a = static_cast<uint8_t>(alpha * 255.0f);
+        sPixels[y * sz + x] = (0xFF << 24) | (0xFF << 16) | (0xFF << 8) | a;
+      }
     }
+    SDL_UpdateTexture(square, nullptr, sPixels, sz * sizeof(uint32_t));
+    SDL_SetTextureBlendMode(square, SDL_BLENDMODE_BLEND);
+    cache_["marker_square"] = square;
+    delete[] sPixels;
+  }
+
+  SDL_Texture *get(const std::string &key) const {
+    auto it = cache_.find(key);
+    return it != cache_.end() ? it->second : nullptr;
+  }
 
 private:
-    std::map<std::string, SDL_Texture*> cache_;
+  std::map<std::string, SDL_Texture *> cache_;
 };

@@ -189,4 +189,72 @@ void drawPolyline(SDL_Renderer *renderer, const SDL_FPoint *points, int count,
                      static_cast<int>(indices.size()));
 }
 
+void drawThickLineTextured(SDL_Renderer *renderer, SDL_Texture *tex, float x1,
+                           float y1, float x2, float y2, float thickness,
+                           SDL_Color color) {
+  float dx = x2 - x1;
+  float dy = y2 - y1;
+  float length = std::sqrt(dx * dx + dy * dy);
+  if (length < 0.001f)
+    return;
+
+  float nx = -dy / length * (thickness / 2.0f);
+  float ny = dx / length * (thickness / 2.0f);
+
+  SDL_Vertex verts[4];
+  for (int i = 0; i < 4; ++i) {
+    verts[i].color = color;
+  }
+
+  verts[0].position = {x1 + nx, y1 + ny};
+  verts[0].tex_coord = {0, 0};
+  verts[1].position = {x1 - nx, y1 - ny};
+  verts[1].tex_coord = {0, 1};
+  verts[2].position = {x2 + nx, y2 + ny};
+  verts[2].tex_coord = {1, 0};
+  verts[3].position = {x2 - nx, y2 - ny};
+  verts[3].tex_coord = {1, 1};
+
+  int indices[] = {0, 1, 2, 1, 2, 3};
+  SDL_RenderGeometry(renderer, tex, verts, 4, indices, 6);
+}
+
+void drawPolylineTextured(SDL_Renderer *renderer, SDL_Texture *tex,
+                          const SDL_FPoint *points, int count, float thickness,
+                          SDL_Color color, bool closed) {
+  if (count < 2)
+    return;
+
+  float r = thickness / 2.0f;
+  for (int i = 0; i < (closed ? count : count - 1); ++i) {
+    int i1 = i;
+    int i2 = (i + 1) % count;
+
+    float dx = points[i2].x - points[i1].x;
+    float dy = points[i2].y - points[i1].y;
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 0.001f)
+      continue;
+
+    float nx = -dy / len * r;
+    float ny = dx / len * r;
+
+    SDL_Vertex v[4];
+    for (int j = 0; j < 4; ++j)
+      v[j].color = color;
+
+    v[0].position = {points[i1].x + nx, points[i1].y + ny};
+    v[0].tex_coord = {0, 0};
+    v[1].position = {points[i1].x - nx, points[i1].y - ny};
+    v[1].tex_coord = {0, 1};
+    v[2].position = {points[i2].x + nx, points[i2].y + ny};
+    v[2].tex_coord = {1, 0};
+    v[3].position = {points[i2].x - nx, points[i2].y - ny};
+    v[3].tex_coord = {1, 1};
+
+    int indices[] = {0, 1, 2, 1, 2, 3};
+    SDL_RenderGeometry(renderer, tex, v, 4, indices, 6);
+  }
+}
+
 } // namespace RenderUtils

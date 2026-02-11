@@ -27,6 +27,8 @@ private:
   struct CacheEntry {
     std::string data;
     std::time_t timestamp;
+    std::string lastModified;
+    std::string etag;
   };
   std::unordered_map<std::string, CacheEntry> cache_;
   std::mutex cacheMutex_;

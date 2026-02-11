@@ -14,8 +14,9 @@ static constexpr double kDeg2Rad = kPi / 180.0;
 static const char *kCompassLabels[8] = {"N", "NE", "E", "SE",
                                         "S", "SW", "W", "NW"};
 
-SatPanel::SatPanel(int x, int y, int w, int h, FontManager &fontMgr)
-    : Widget(x, y, w, h), fontMgr_(fontMgr) {}
+SatPanel::SatPanel(int x, int y, int w, int h, FontManager &fontMgr,
+                   TextureManager &texMgr)
+    : Widget(x, y, w, h), fontMgr_(fontMgr), texMgr_(texMgr) {}
 
 void SatPanel::destroyCache() {
   for (int i = 0; i < kNumLines; ++i) {
@@ -174,15 +175,17 @@ void SatPanel::render(SDL_Renderer *renderer) {
   int plotW = width_ - 2 * pad;
   if (plotH > 10 && plotW > 10 && hasPredictor()) {
     int radius = std::min(plotW, plotH) / 2 - 2;
-    int cx = x_ + width_ / 2;
-    int cy = plotTop + plotH / 2;
+    float cx = x_ + width_ / 2.0f;
+    float cy = plotTop + plotH / 2.0f;
+    texMgr_.generateLineTexture(renderer, "line_aa");
+    texMgr_.generateMarkerTextures(renderer);
     renderPolarPlot(renderer, cx, cy, radius);
   }
 
   SDL_RenderSetClipRect(renderer, nullptr);
 }
 
-void SatPanel::renderPolarPlot(SDL_Renderer *renderer, int cx, int cy,
+void SatPanel::renderPolarPlot(SDL_Renderer *renderer, float cx, float cy,
                                int radius) {
   // --- Compass labels (outside the circle) ---
   if (compassFontSize_ != lastCompassFontSize_) {
@@ -205,82 +208,80 @@ void SatPanel::renderPolarPlot(SDL_Renderer *renderer, int cx, int cy,
     if (compassTex_[i]) {
       double angle = i * 45.0 * kDeg2Rad; // N=0, NE=45, E=90, ...
       int labelDist = radius + 2;
-      int lx =
-          cx + static_cast<int>(labelDist * std::sin(angle)) - compassW_[i] / 2;
-      int ly =
-          cy - static_cast<int>(labelDist * std::cos(angle)) - compassH_[i] / 2;
+      int lx = cx + static_cast<int>(labelDist * std::sin(angle)) -
+               compassW_[i] / 2.0f;
+      int ly = cy - static_cast<int>(labelDist * std::cos(angle)) -
+               compassH_[i] / 2.0f;
       SDL_Rect dst = {lx, ly, compassW_[i], compassH_[i]};
       SDL_RenderCopy(renderer, compassTex_[i], nullptr, &dst);
     }
   }
 
+  SDL_Texture *lineTex = texMgr_.get("line_aa");
+
   // --- Concentric elevation circles (0, 30, 60 degrees) ---
-  SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255);
   for (int elev = 0; elev <= 60; elev += 30) {
-    int r = radius * (90 - elev) / 90;
-    // Draw circle as line segments
+    float r = static_cast<float>(radius * (90 - elev) / 90.0);
     constexpr int kSegs = 72;
-    SDL_Point prev{};
+    std::vector<SDL_FPoint> segs;
+    segs.reserve(kSegs + 1);
     for (int s = 0; s <= kSegs; ++s) {
       double theta = 2.0 * kPi * s / kSegs;
-      int px = cx + static_cast<int>(r * std::cos(theta));
-      int py = cy + static_cast<int>(r * std::sin(theta));
-      if (s > 0) {
-        RenderUtils::drawThickLine(
-            renderer, static_cast<float>(prev.x), static_cast<float>(prev.y),
-            static_cast<float>(px), static_cast<float>(py), 1.0f,
-            {60, 60, 60, 255});
-      }
-      prev = {px, py};
+      segs.push_back({static_cast<float>(cx + r * std::cos(theta)),
+                      static_cast<float>(cy + r * std::sin(theta))});
     }
+    RenderUtils::drawPolylineTextured(renderer, lineTex, segs.data(),
+                                      static_cast<int>(segs.size()), 1.5f,
+                                      {60, 60, 60, 255});
   }
 
   // --- Radial lines (every 45 degrees) ---
   for (int i = 0; i < 8; ++i) {
     double angle = i * 45.0 * kDeg2Rad;
-    int ex = cx + static_cast<int>(radius * std::sin(angle));
-    int ey = cy - static_cast<int>(radius * std::cos(angle));
-    RenderUtils::drawThickLine(renderer, static_cast<float>(cx),
-                               static_cast<float>(cy), static_cast<float>(ex),
-                               static_cast<float>(ey), 1.0f, {60, 60, 60, 255});
+    float ex = static_cast<float>(cx + radius * std::sin(angle));
+    float ey = static_cast<float>(cy - radius * std::cos(angle));
+    RenderUtils::drawThickLineTextured(
+        renderer, lineTex, static_cast<float>(cx), static_cast<float>(cy), ex,
+        ey, 1.5f, {60, 60, 60, 255});
   }
 
   // --- Pass trajectory arc (green) ---
   if (passTrack_.size() >= 2) {
-    SDL_SetRenderDrawColor(renderer, 0, 200, 0, 255);
-    for (size_t i = 1; i < passTrack_.size(); ++i) {
-      auto project = [&](const AzElPoint &p) -> SDL_Point {
-        double r = radius * (90.0 - p.el) / 90.0;
-        int px = cx + static_cast<int>(r * std::sin(p.az * kDeg2Rad));
-        int py = cy - static_cast<int>(r * std::cos(p.az * kDeg2Rad));
-        return {px, py};
-      };
-      SDL_Point p1 = project(passTrack_[i - 1]);
-      SDL_Point p2 = project(passTrack_[i]);
-      RenderUtils::drawThickLine(
-          renderer, static_cast<float>(p1.x), static_cast<float>(p1.y),
-          static_cast<float>(p2.x), static_cast<float>(p2.y), 2.0f,
-          {0, 200, 0, 255});
+    std::vector<SDL_FPoint> poly;
+    poly.reserve(passTrack_.size());
+    for (const auto &p : passTrack_) {
+      double r = radius * (90.0 - p.el) / 90.0;
+      poly.push_back({static_cast<float>(cx + r * std::sin(p.az * kDeg2Rad)),
+                      static_cast<float>(cy - r * std::cos(p.az * kDeg2Rad))});
     }
+    RenderUtils::drawPolylineTextured(renderer, lineTex, poly.data(),
+                                      static_cast<int>(poly.size()), 3.0f,
+                                      {0, 200, 0, 255});
   }
 
   // --- Current satellite position (if above horizon) ---
   if (satAboveHorizon_) {
     double r = radius * (90.0 - currentPos_.el) / 90.0;
-    int sx = cx + static_cast<int>(r * std::sin(currentPos_.az * kDeg2Rad));
-    int sy = cy - static_cast<int>(r * std::cos(currentPos_.az * kDeg2Rad));
+    float sx = static_cast<float>(cx + r * std::sin(currentPos_.az * kDeg2Rad));
+    float sy = static_cast<float>(cy - r * std::cos(currentPos_.az * kDeg2Rad));
 
     // Filled circle marker
     float markerR = std::max(2.0f, radius / 20.0f);
-    RenderUtils::drawCircle(renderer, static_cast<float>(sx),
-                            static_cast<float>(sy), markerR, {0, 255, 0, 255});
+    SDL_Texture *mTex = texMgr_.get("marker_circle");
+    if (mTex) {
+      SDL_FRect mDst = {sx - markerR, sy - markerR, markerR * 2, markerR * 2};
+      SDL_SetTextureColorMod(mTex, 0, 255, 0);
+      SDL_SetTextureAlphaMod(mTex, 255);
+      SDL_RenderCopyF(renderer, mTex, nullptr, &mDst);
+    }
 
     // Label: elevation angle
     char elBuf[16];
     std::snprintf(elBuf, sizeof(elBuf), "%.0f%c", currentPos_.el, '\xB0');
     SDL_Color green = {0, 255, 0, 255};
-    fontMgr_.drawText(renderer, elBuf, sx + markerR + 2,
-                      sy - compassFontSize_ / 2, green, compassFontSize_);
+    fontMgr_.drawText(renderer, elBuf, static_cast<int>(sx + markerR + 2),
+                      static_cast<int>(sy - compassFontSize_ / 2.0f), green,
+                      compassFontSize_);
   }
 }
 

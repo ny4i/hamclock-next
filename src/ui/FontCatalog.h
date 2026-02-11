@@ -104,7 +104,7 @@ private:
   static constexpr int kStyleCount = static_cast<int>(FontStyle::Count_);
 
   // Base point sizes at 800x480.  Tuned so TTF_FontHeight ≈ target.
-  // Adjust these constants if the font file (assets/font.ttf) changes.
+  // Adjust these constants if the embedded font changes.
   static constexpr int kSmallBasePt = 33;
   static constexpr int kLargeBasePt = 60;
   static constexpr int kFastBasePt = 11;

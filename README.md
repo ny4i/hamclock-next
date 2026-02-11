@@ -5,12 +5,11 @@ HamClock-Next is a modern, SDL2-based reconstruction of the classic HamClock. It
 ## 🚀 Key Accomplishments
 
 ### Visuals & Rendering
-- **High-DPI Support**: Implemented text super-sampling and logical scaling, ensuring crisp text and graphics on 4K/Retina displays.
-- **Visual Fidelity Mode**: A layout system that matches the original HamClock canonical pixel positions (800x480) with sub-pixel precision.
-- **Graphics Smoothing**: Enabled 4x MSAA (Multi-Sample Anti-Aliasing) and bilinear filtering for smooth map lines and satellite tracks.
-- **Advanced Vector Graphics**: Integrated hardware-accelerated ribbon paths and continuous polylines for seamless great circle and satellite tracks, along with differentiated, high-contrast markers for receivers and transmitters.
-
-- **Dynamic UI**: Responsive resizing with automatic font re-rasterization to maintain quality.
+- **High-Fidelity Rendering**: Implemented text super-sampling and logical scaling for crisp 4K/Retina display.
+- **Dynamic Seasonal Maps**: Automatically downloads high-resolution NASA Blue Marble backgrounds based on the current month, with a vector grid fallback for offline use.
+- **Zero-Asset Binary**: Essential assets (fonts, icons) are embedded directly into the executable, creating a self-contained single-file deployment.
+- **Graphics Smoothing**: Hardware-accelerated anti-aliasing (4x MSAA) and ribbon-path primitives for smooth great circles and satellite tracks.
+- **Advanced Caching**: Implemented a "lean" caching system using HTTP HEAD validation (`Last-Modified`/`ETag`) to save bandwidth by avoiding redundant downloads.
 
 ### Features
 - **Global Map**: Interactive map with day/night terminator, great circle paths, and real-time overlays.

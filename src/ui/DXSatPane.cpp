@@ -5,10 +5,12 @@
 #include <cmath>
 
 DXSatPane::DXSatPane(int x, int y, int w, int h, FontManager &fontMgr,
+                     TextureManager &texMgr,
                      std::shared_ptr<HamClockState> state,
                      SatelliteManager &satMgr)
-    : Widget(x, y, w, h), fontMgr_(fontMgr), state_(state), satMgr_(satMgr),
-      dxPanel_(x, y, w, h, fontMgr, state), satPanel_(x, y, w, h, fontMgr) {}
+    : Widget(x, y, w, h), fontMgr_(fontMgr), texMgr_(texMgr), state_(state),
+      satMgr_(satMgr), dxPanel_(x, y, w, h, fontMgr, state),
+      satPanel_(x, y, w, h, fontMgr, texMgr) {}
 
 DXSatPane::~DXSatPane() { destroyMenuTextures(); }
 
