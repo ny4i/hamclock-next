@@ -5,10 +5,18 @@
 // --- DXPedPanel ---
 
 DXPedPanel::DXPedPanel(int x, int y, int w, int h, FontManager &fontMgr,
+                       ActivityProvider &provider,
                        std::shared_ptr<ActivityDataStore> store)
-    : ListPanel(x, y, w, h, fontMgr, "DX Peditions", {}), store_(store) {}
+    : ListPanel(x, y, w, h, fontMgr, "DX Peditions", {}), provider_(provider),
+      store_(store) {}
 
 void DXPedPanel::update() {
+  uint32_t nowTicks = SDL_GetTicks();
+  if (nowTicks - lastFetch_ > 20 * 60 * 1000 || lastFetch_ == 0) { // 20 mins
+    lastFetch_ = nowTicks;
+    provider_.fetch();
+  }
+
   auto data = store_->get();
   if (data.lastUpdated != lastUpdate_) {
     std::vector<std::string> rows;
@@ -31,10 +39,18 @@ void DXPedPanel::update() {
 // --- ONTAPanel ---
 
 ONTAPanel::ONTAPanel(int x, int y, int w, int h, FontManager &fontMgr,
+                     ActivityProvider &provider,
                      std::shared_ptr<ActivityDataStore> store)
-    : ListPanel(x, y, w, h, fontMgr, "On The Air", {}), store_(store) {}
+    : ListPanel(x, y, w, h, fontMgr, "On The Air", {}), provider_(provider),
+      store_(store) {}
 
 void ONTAPanel::update() {
+  uint32_t nowTicks = SDL_GetTicks();
+  if (nowTicks - lastFetch_ > 5 * 60 * 1000 || lastFetch_ == 0) { // 5 mins
+    lastFetch_ = nowTicks;
+    provider_.fetch();
+  }
+
   auto data = store_->get();
   if (data.lastUpdated != lastUpdate_) {
     std::vector<std::string> rows;

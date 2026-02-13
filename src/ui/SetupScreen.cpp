@@ -153,7 +153,7 @@ void SetupScreen::render(SDL_Renderer *renderer) {
   case Tab::Identity:
     renderTabIdentity(renderer, cx, pad, fieldW, fieldH, fieldX, textPad);
     break;
-  case Tab::DXCluster:
+  case Tab::Spotting:
     renderTabDXCluster(renderer, cx, pad, fieldW, fieldH, fieldX, textPad);
     break;
   case Tab::Appearance:
@@ -229,38 +229,44 @@ void SetupScreen::renderTabDXCluster(SDL_Renderer *renderer, int cx, int pad,
                                      int fieldW, int fieldH, int fieldX,
                                      int textPad) {
   int y = (y_ + titleSize_ + 2 * pad + fieldH + pad / 2);
-  int vSpace = pad / 2;
+  int vSpace = 5;
   SDL_Color white = {255, 255, 255, 255};
   SDL_Color orange = {255, 165, 0, 255};
   SDL_Color gray = {140, 140, 140, 255};
+  SDL_Color cyan = {0, 200, 255, 255};
 
-  fontMgr_.drawText(renderer, "DX Cluster Host:", fieldX, y, white, labelSize_,
-                    true);
+  // --- DX CLUSTER SECTION ---
+  fontMgr_.drawText(renderer, "--- DX Cluster ---", cx, y, cyan, labelSize_,
+                    true, true);
+  y += labelSize_ + vSpace;
+
+  fontMgr_.drawText(renderer, "Host:", fieldX, y, white, labelSize_, true);
+  fontMgr_.drawText(renderer, "Port:", fieldX + fieldW / 2 + pad, y, white,
+                    labelSize_, true);
   y += labelSize_ + 4;
-  renderField(renderer, fontMgr_, clusterHost_, "dxusa.net", fieldX, y, fieldW,
-              fieldH, fieldSize_, textPad, activeField_ == 0,
+
+  int halfW = (fieldW - pad) / 2;
+  int hostY = y;
+  renderField(renderer, fontMgr_, clusterHost_, "dxusa.net", fieldX, hostY,
+              halfW, fieldH, fieldSize_, textPad, activeField_ == 0,
               !clusterHost_.empty(), cursorPos_, orange, gray, white, white,
               gray);
-  y += vSpace;
-
-  fontMgr_.drawText(renderer, "Cluster Port:", fieldX, y, white, labelSize_,
-                    true);
-  y += labelSize_ + 4;
-  renderField(renderer, fontMgr_, clusterPort_, "7000", fieldX, y, fieldW,
-              fieldH, fieldSize_, textPad, activeField_ == 1,
+  int portY = y;
+  renderField(renderer, fontMgr_, clusterPort_, "7300", fieldX + halfW + pad,
+              portY, halfW, fieldH, fieldSize_, textPad, activeField_ == 1,
               !clusterPort_.empty(), cursorPos_, orange, gray, white, white,
               gray);
-  y += vSpace;
+  y += fieldH + vSpace;
 
-  fontMgr_.drawText(renderer, "Cluster Login:", fieldX, y, white, labelSize_,
-                    true);
+  fontMgr_.drawText(renderer, "Login:", fieldX, y, white, labelSize_, true);
   y += labelSize_ + 4;
   renderField(renderer, fontMgr_, clusterLogin_, "NOCALL", fieldX, y, fieldW,
               fieldH, fieldSize_, textPad, activeField_ == 2,
               !clusterLogin_.empty(), cursorPos_, orange, gray, white, white,
               gray);
-  y += vSpace;
+  y += fieldH + vSpace;
 
+  // Toggles row 1
   SDL_Rect enableToggle = {fieldX, y, 20, 20};
   SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
   SDL_RenderFillRect(renderer, &enableToggle);
@@ -274,7 +280,8 @@ void SetupScreen::renderTabDXCluster(SDL_Renderer *renderer, int cx, int pad,
   fontMgr_.drawText(renderer, "Enable DX Cluster", fieldX + 30, y + 2, white,
                     labelSize_);
   clusterToggleRect_ = enableToggle;
-  y += pad;
+
+  y += 24;
 
   SDL_Rect toggle = {fieldX, y, 20, 20};
   SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
@@ -289,6 +296,45 @@ void SetupScreen::renderTabDXCluster(SDL_Renderer *renderer, int cx, int pad,
   fontMgr_.drawText(renderer, "Use WSJ-TX (UDP Port 2237)", fieldX + 30, y + 2,
                     white, labelSize_);
   toggleRect_ = toggle;
+  y += 30;
+
+  // --- PSK REPORTER SECTION ---
+  fontMgr_.drawText(renderer, "--- PSK Reporter ---", cx, y, cyan, labelSize_,
+                    true, true);
+  y += labelSize_ + vSpace;
+
+  // PSK Mode Toggle (DE/DX)
+  SDL_Rect pskDeToggle = {fieldX, y, 20, 20};
+  SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
+  SDL_RenderFillRect(renderer, &pskDeToggle);
+  SDL_SetRenderDrawColor(renderer, 100, 100, 120, 255);
+  SDL_RenderDrawRect(renderer, &pskDeToggle);
+  if (pskOfDe_) { // OF DE = Mapping Receivers hearing US
+    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+    SDL_Rect check = {fieldX + 4, y + 4, 12, 12};
+    SDL_RenderFillRect(renderer, &check);
+  }
+  fontMgr_.drawText(renderer,
+                    pskOfDe_ ? "Mode: DE (Map receivers hearing Me)"
+                             : "Mode: DX (Map senders I hear)",
+                    fieldX + 30, y + 2, white, labelSize_);
+  pskOfDeRect_ = pskDeToggle;
+  y += 24;
+
+  // PSK Filter Toggle (Call/Grid)
+  SDL_Rect pskCallToggle = {fieldX, y, 20, 20};
+  SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
+  SDL_RenderFillRect(renderer, &pskCallToggle);
+  SDL_SetRenderDrawColor(renderer, 100, 100, 120, 255);
+  SDL_RenderDrawRect(renderer, &pskCallToggle);
+  if (pskUseCall_) {
+    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+    SDL_Rect check = {fieldX + 4, y + 4, 12, 12};
+    SDL_RenderFillRect(renderer, &check);
+  }
+  fontMgr_.drawText(renderer, pskUseCall_ ? "Filter: Callsign" : "Filter: Grid",
+                    fieldX + 30, y + 2, white, labelSize_);
+  pskUseCallRect_ = pskCallToggle;
 }
 
 void SetupScreen::renderTabAppearance(SDL_Renderer *renderer, int, int pad,
@@ -319,6 +365,36 @@ void SetupScreen::renderTabAppearance(SDL_Renderer *renderer, int, int pad,
                     themeBtn.y + themeBtn.h / 2, white, hintSize_, false, true);
   themeRect_ = themeBtn;
   y += vSpace * 2;
+
+  SDL_Rect nlToggle = {fieldX, y, 20, 20};
+  SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
+  SDL_RenderFillRect(renderer, &nlToggle);
+  SDL_SetRenderDrawColor(renderer, 100, 100, 120, 255);
+  SDL_RenderDrawRect(renderer, &nlToggle);
+  if (mapNightLights_) {
+    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+    SDL_Rect check = {fieldX + 4, y + 4, 12, 12};
+    SDL_RenderFillRect(renderer, &check);
+  }
+  fontMgr_.drawText(renderer, "Enable Map Night Lights", fieldX + 30, y + 2,
+                    white, labelSize_);
+  nightLightsRect_ = nlToggle;
+  y += pad;
+
+  SDL_Rect metricToggle = {fieldX, y, 20, 20};
+  SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
+  SDL_RenderFillRect(renderer, &metricToggle);
+  SDL_SetRenderDrawColor(renderer, 100, 100, 120, 255);
+  SDL_RenderDrawRect(renderer, &metricToggle);
+  if (useMetric_) {
+    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+    SDL_Rect check = {fieldX + 4, y + 4, 12, 12};
+    SDL_RenderFillRect(renderer, &check);
+  }
+  fontMgr_.drawText(renderer, "Use Metric Units (Celsius, km, m/s)",
+                    fieldX + 30, y + 2, white, labelSize_);
+  metricToggleRect_ = metricToggle;
+  y += pad;
 
   fontMgr_.drawText(renderer, "Callsign Color:", fieldX, y, white, labelSize_);
   SDL_Rect colorBox = {fieldX + fieldW - 40, y, 40, 20};
@@ -435,7 +511,7 @@ bool SetupScreen::onMouseUp(int mx, int my, Uint16) {
     }
   }
 
-  if (activeTab_ == Tab::DXCluster) {
+  if (activeTab_ == Tab::Spotting) {
     if (mx >= clusterToggleRect_.x &&
         mx <= clusterToggleRect_.x + clusterToggleRect_.w &&
         my >= clusterToggleRect_.y &&
@@ -446,6 +522,18 @@ bool SetupScreen::onMouseUp(int mx, int my, Uint16) {
     if (mx >= toggleRect_.x && mx <= toggleRect_.x + toggleRect_.w &&
         my >= toggleRect_.y && my <= toggleRect_.y + toggleRect_.h) {
       clusterWSJTX_ = !clusterWSJTX_;
+      return true;
+    }
+    if (mx >= pskOfDeRect_.x && mx <= pskOfDeRect_.x + pskOfDeRect_.w &&
+        my >= pskOfDeRect_.y && my <= pskOfDeRect_.y + pskOfDeRect_.h) {
+      pskOfDe_ = !pskOfDe_;
+      return true;
+    }
+    if (mx >= pskUseCallRect_.x &&
+        mx <= pskUseCallRect_.x + pskUseCallRect_.w &&
+        my >= pskUseCallRect_.y &&
+        my <= pskUseCallRect_.y + pskUseCallRect_.h) {
+      pskUseCall_ = !pskUseCall_;
       return true;
     }
   }
@@ -459,6 +547,20 @@ bool SetupScreen::onMouseUp(int mx, int my, Uint16) {
         theme_ = "glass";
       else
         theme_ = "default";
+      return true;
+    }
+    if (mx >= nightLightsRect_.x &&
+        mx <= nightLightsRect_.x + nightLightsRect_.w &&
+        my >= nightLightsRect_.y &&
+        my <= nightLightsRect_.y + nightLightsRect_.h) {
+      mapNightLights_ = !mapNightLights_;
+      return true;
+    }
+    if (mx >= metricToggleRect_.x &&
+        mx <= metricToggleRect_.x + metricToggleRect_.w &&
+        my >= metricToggleRect_.y &&
+        my <= metricToggleRect_.y + metricToggleRect_.h) {
+      useMetric_ = !useMetric_;
       return true;
     }
   }
@@ -497,7 +599,7 @@ bool SetupScreen::onMouseUp(int mx, int my, Uint16) {
   int nFields = 0;
   if (activeTab_ == Tab::Identity)
     nFields = 4;
-  else if (activeTab_ == Tab::DXCluster)
+  else if (activeTab_ == Tab::Spotting)
     nFields = 3;
   else if (activeTab_ == Tab::Appearance)
     nFields = 1;
@@ -555,7 +657,7 @@ bool SetupScreen::onKeyDown(SDL_Keycode key, Uint16) {
       text = &lonText_;
       break;
     }
-  } else if (activeTab_ == Tab::DXCluster) {
+  } else if (activeTab_ == Tab::Spotting) {
     nFields = 3;
     switch (activeField_) {
     case 0:
@@ -649,7 +751,7 @@ bool SetupScreen::onTextInput(const char *inputText) {
       maxLen = 12;
       break;
     }
-  } else if (activeTab_ == Tab::DXCluster) {
+  } else if (activeTab_ == Tab::Spotting) {
     switch (activeField_) {
     case 0:
       field = &clusterHost_;
@@ -712,8 +814,14 @@ void SetupScreen::setConfig(const AppConfig &cfg) {
   clusterLogin_ = cfg.dxClusterLogin;
   clusterEnabled_ = cfg.dxClusterEnabled;
   clusterWSJTX_ = cfg.dxClusterUseWSJTX;
+  pskOfDe_ = cfg.pskOfDe;
+  pskUseCall_ = cfg.pskUseCall;
+  pskMaxAge_ = cfg.pskMaxAge;
+
   rotationInterval_ = cfg.rotationIntervalS;
   theme_ = cfg.theme;
+  mapNightLights_ = cfg.mapNightLights;
+  useMetric_ = cfg.useMetric;
   callsignColor_ = cfg.callsignColor;
   panelMode_ = cfg.panelMode;
   selectedSatellite_ = cfg.selectedSatellite;
@@ -739,8 +847,14 @@ AppConfig SetupScreen::getConfig() const {
   cfg.dxClusterLogin = clusterLogin_;
   cfg.dxClusterEnabled = clusterEnabled_;
   cfg.dxClusterUseWSJTX = clusterWSJTX_;
+  cfg.pskOfDe = pskOfDe_;
+  cfg.pskUseCall = pskUseCall_;
+  cfg.pskMaxAge = pskMaxAge_;
+
   cfg.rotationIntervalS = rotationInterval_;
   cfg.theme = theme_;
+  cfg.mapNightLights = mapNightLights_;
+  cfg.useMetric = useMetric_;
   cfg.callsignColor = callsignColor_;
   cfg.panelMode = panelMode_;
   cfg.selectedSatellite = selectedSatellite_;
@@ -756,7 +870,8 @@ AppConfig SetupScreen::getConfig() const {
 std::vector<std::string> SetupScreen::getActions() const {
   return {"tab_identity", "tab_dxcluster", "tab_appearance",
           "tab_widgets",  "field_0",       "field_1",
-          "field_2",      "field_3",       "done"};
+          "field_2",      "field_3",       "toggle_night_lights",
+          "done"};
 }
 
 SDL_Rect SetupScreen::getActionRect(const std::string &action) const {
@@ -783,6 +898,10 @@ SDL_Rect SetupScreen::getActionRect(const std::string &action) const {
     int idx = std::stoi(action.substr(6));
     int fy = yStart + idx * (labelSize_ + fieldH + pad / 2);
     return {fieldX, fy, fieldW, fieldH};
+  }
+
+  if (action == "toggle_night_lights") {
+    return nightLightsRect_;
   }
 
   if (action == "done") {

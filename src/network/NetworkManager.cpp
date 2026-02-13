@@ -1,8 +1,8 @@
 #include "NetworkManager.h"
+#include "../core/Logger.h"
 
 #include <curl/curl.h>
 
-#include <cstdio>
 #include <thread>
 
 #include <filesystem>
@@ -66,11 +66,8 @@ void NetworkManager::fetchAsync(const std::string &url,
   if (hasCache && !force) {
     std::time_t now = std::time(nullptr);
     if (now - cached.timestamp < cacheAgeSeconds) {
-      std::fprintf(stderr, "NetworkManager: memory cache hit for %s\n",
-                   url.c_str());
-      std::thread([cb = std::move(callback), data = cached.data]() {
-        cb(data);
-      }).detach();
+      LOG_T("NetworkManager", "Memory cache hit for {}", url);
+      callback(cached.data);
       return;
     }
   }
@@ -78,7 +75,7 @@ void NetworkManager::fetchAsync(const std::string &url,
   std::thread([this, url, callback = std::move(callback), hasCache, cached]() {
     CURL *curl = curl_easy_init();
     if (!curl) {
-      std::fprintf(stderr, "NetworkManager: curl_easy_init failed\n");
+      LOG_E("NetworkManager", "curl_easy_init failed");
       callback("");
       return;
     }
@@ -101,9 +98,7 @@ void NetworkManager::fetchAsync(const std::string &url,
         if (responseCode >= 200 && responseCode < 300) {
           if (headers.count("last-modified") &&
               headers.at("last-modified") == cached.lastModified) {
-            std::fprintf(stderr,
-                         "NetworkManager: cache validated (HEAD) for %s\n",
-                         url.c_str());
+            LOG_T("NetworkManager", "Cache validated (HEAD) for {}", url);
             // Still valid! Update timestamp and return cached
             {
               std::lock_guard<std::mutex> lock(cacheMutex_);
@@ -124,14 +119,22 @@ void NetworkManager::fetchAsync(const std::string &url,
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-    std::fprintf(stderr, "NetworkManager: fetching from network: %s\n",
-                 url.c_str());
+    LOG_D("NetworkManager", "Fetching from network: {}", url);
     CURLcode res = curl_easy_perform(curl);
+
+    long responseCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-      std::fprintf(stderr, "NetworkManager: fetch failed for %s: %s\n",
-                   url.c_str(), curl_easy_strerror(res));
+      LOG_E("NetworkManager", "Fetch failed for {}: {}", url,
+            curl_easy_strerror(res));
+      callback("");
+      return;
+    }
+
+    if (responseCode != 200) {
+      LOG_E("NetworkManager", "HTTP error {} for {}", responseCode, url);
       callback("");
       return;
     }
@@ -166,9 +169,8 @@ NetworkManager::NetworkManager(const std::filesystem::path &cacheDir)
     if (!ec) {
       loadCache();
     } else {
-      std::fprintf(stderr,
-                   "NetworkManager: failed to create cache dir %s: %s\n",
-                   cacheDir_.c_str(), ec.message().c_str());
+      LOG_E("NetworkManager", "Failed to create cache dir {}: {}",
+            cacheDir_.string(), ec.message());
     }
   }
 }

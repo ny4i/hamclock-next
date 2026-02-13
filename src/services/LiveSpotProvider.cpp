@@ -1,9 +1,12 @@
 #include "LiveSpotProvider.h"
+#include "../core/HamClockState.h"
+#include "../core/Logger.h"
 
 #include <chrono>
-#include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <nlohmann/json.hpp>
+#include <spdlog/fmt/fmt.h>
 #include <string>
 
 namespace {
@@ -23,7 +26,11 @@ std::string extractAttr(const std::string &tag, const char *attr) {
 
 // Parse PSK Reporter XML response, aggregating spot counts per band
 // and collecting individual spot records for map plotting.
-void parsePSKReporter(const std::string &body, LiveSpotData &data) {
+// If plotReceivers is true (DE mode), we map who heard us (ReceiverLocator,
+// ReceiverCallsign). If plotReceivers is false (DX mode), we map who we heard
+// (SenderLocator, SenderCallsign).
+void parsePSKReporter(const std::string &body, LiveSpotData &data,
+                      bool plotReceivers) {
   std::string::size_type pos = 0;
   int total = 0;
 
@@ -48,9 +55,22 @@ void parsePSKReporter(const std::string &body, LiveSpotData &data) {
         data.bandCounts[idx]++;
         total++;
 
-        std::string grid = extractAttr(tag, "receiverLocator");
+        std::string grid;
+        std::string call;
+
+        if (plotReceivers) {
+          // We are the sender. Map the receiver.
+          grid = extractAttr(tag, "receiverLocator");
+          call = extractAttr(tag, "receiverCallsign");
+        } else {
+          // We are the receiver. Map the sender.
+          grid = extractAttr(tag, "senderLocator");
+          call = extractAttr(tag, "senderCallsign");
+        }
+
         if (grid.size() >= 4) {
-          data.spots.push_back({freqKhz, grid});
+          // Store in generic fields (SpotRecord uses receiverGrid for location)
+          data.spots.push_back({freqKhz, grid, call});
         }
       }
     }
@@ -58,63 +78,85 @@ void parsePSKReporter(const std::string &body, LiveSpotData &data) {
     pos = tagEnd + 1;
   }
 
-  std::fprintf(
-      stderr,
-      "LiveSpotProvider: parsed %d spots (%zu with grids) across bands\n",
-      total, data.spots.size());
+  LOG_I("LiveSpot", "Parsed {} spots ({} with grids)", total,
+        data.spots.size());
 }
 
 } // namespace
 
 LiveSpotProvider::LiveSpotProvider(NetworkManager &net,
                                    std::shared_ptr<LiveSpotDataStore> store,
-                                   const std::string &callsign,
-                                   const std::string &grid)
-    : net_(net), store_(std::move(store)), callsign_(callsign), grid_(grid) {}
+                                   const AppConfig &config,
+                                   HamClockState *state)
+    : net_(net), store_(std::move(store)), config_(config), state_(state) {}
 
 void LiveSpotProvider::fetch() {
-  if (grid_.empty()) {
-    std::fprintf(stderr, "LiveSpotProvider: no grid configured, skipping\n");
+  std::string target;
+  if (config_.pskUseCall) {
+    target = config_.callsign;
+  } else {
+    if (config_.grid.size() < 4) {
+      LOG_W("LiveSpot", "Grid too short for PSK query: {}", config_.grid);
+      return;
+    }
+    target = config_.grid.substr(0, 4);
+  }
+
+  if (target.empty()) {
+    LOG_W("LiveSpot", "No callsign or grid configured, skipping");
     return;
   }
 
-  // Build PSK Reporter URL: spots from our grid (last 30 minutes)
+  // Build PSK Reporter URL: spots from/by our location
   auto now = std::time(nullptr);
-  // Quantize to 5-minute (300s) intervals to allow cache hits and prevent IP
-  // blocks
   int64_t quantizedNow = (static_cast<int64_t>(now) / 300) * 300;
-  int64_t windowStart = quantizedNow - 1800;
+  int64_t windowStart = quantizedNow - (config_.pskMaxAge * 60);
 
-  // Use only the first 4 characters of the grid (field + square)
-  std::string grid4 = grid_.substr(0, 4);
+  std::string param;
+  if (config_.pskOfDe) {
+    // We are sender: Who heard ME?
+    param = config_.pskUseCall ? "senderCallsign=" : "senderLocator=";
+  } else {
+    // We are receiver: Who did I hear? (or who did people in my grid hear)
+    param = config_.pskUseCall ? "receiverCallsign=" : "receiverLocator=";
+  }
 
-  std::string url = "https://retrieve.pskreporter.info/query"
-                    "?senderLocator=" +
-                    grid4 + "&flowStartSeconds=" + std::to_string(windowStart) +
-                    "&rronly=1";
+  std::string url = fmt::format("https://retrieve.pskreporter.info/"
+                                "query?{}{}&&flowStartSeconds={}&rronly=1",
+                                param, target, windowStart);
 
-  std::fprintf(stderr, "LiveSpotProvider: fetching %s\n", url.c_str());
+  LOG_I("LiveSpot", "Fetching {}", url);
+  if (state_) {
+    state_->services["LiveSpot"].lastError = "Fetching...";
+  }
 
   auto store = store_;
-  auto grid = grid_;
+  auto grid = config_.grid;
+  auto state = state_;
+  bool ofDe = config_.pskOfDe;
+
   net_.fetchAsync(
       url,
-      [store, grid](std::string body) {
+      [store, grid, state, ofDe](std::string body) {
         LiveSpotData data;
         data.grid = grid.substr(0, 4);
-        data.windowMinutes = 30;
+        data.windowMinutes = 30; // TODO: from config
 
         if (!body.empty()) {
-          parsePSKReporter(body, data);
+          parsePSKReporter(body, data, ofDe);
+          if (state) {
+            auto &s = state->services["LiveSpot"];
+            s.ok = true;
+            s.lastSuccess = std::chrono::system_clock::now();
+            s.lastError = "";
+          }
         } else {
-          std::fprintf(stderr,
-                       "LiveSpotProvider: empty response, using stubs\n");
-          data.bandCounts[5] = 373; // 20m
-          data.bandCounts[6] = 59;  // 17m
-          data.bandCounts[7] = 200; // 15m
-          data.bandCounts[8] = 236; // 12m
-          data.bandCounts[9] = 445; // 10m
-          data.bandCounts[1] = 1;   // 80m
+          LOG_W("LiveSpot", "Empty response from PSK Reporter");
+          if (state) {
+            auto &s = state->services["LiveSpot"];
+            s.ok = false;
+            s.lastError = "Empty response";
+          }
         }
 
         data.lastUpdated = std::chrono::system_clock::now();
@@ -122,4 +164,13 @@ void LiveSpotProvider::fetch() {
         store->set(data);
       },
       300); // 5 minute cache age
+}
+
+nlohmann::json LiveSpotProvider::getDebugData() const {
+  nlohmann::json j;
+  j["callsign"] = config_.callsign;
+  j["grid"] = config_.grid;
+  j["ofDe"] = config_.pskOfDe;
+  j["useCall"] = config_.pskUseCall;
+  return j;
 }

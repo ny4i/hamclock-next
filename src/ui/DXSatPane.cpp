@@ -8,9 +8,11 @@
 DXSatPane::DXSatPane(int x, int y, int w, int h, FontManager &fontMgr,
                      TextureManager &texMgr,
                      std::shared_ptr<HamClockState> state,
-                     SatelliteManager &satMgr)
+                     SatelliteManager &satMgr,
+                     std::shared_ptr<WeatherStore> weatherStore)
     : Widget(x, y, w, h), fontMgr_(fontMgr), texMgr_(texMgr), state_(state),
-      satMgr_(satMgr), dxPanel_(x, y, w, h, fontMgr, state),
+      satMgr_(satMgr),
+      dxPanel_(x, y, w, h, fontMgr, state, std::move(weatherStore)),
       satPanel_(x, y, w, h, fontMgr, texMgr) {}
 
 DXSatPane::~DXSatPane() { destroyMenuTextures(); }
@@ -336,4 +338,30 @@ void DXSatPane::renderMenu(SDL_Renderer *renderer) {
   }
 
   SDL_RenderSetClipRect(renderer, nullptr);
+}
+
+std::vector<std::string> DXSatPane::getActions() const {
+  if (menuState_ == MenuState::Closed) {
+    return {"open_menu"};
+  }
+  return {};
+}
+
+SDL_Rect DXSatPane::getActionRect(const std::string &action) const {
+  if (action == "open_menu") {
+    // Upper 10%
+    int headerH = std::max(1, height_ / 10);
+    return {x_, y_, width_, headerH};
+  }
+  return {0, 0, 0, 0};
+}
+
+nlohmann::json DXSatPane::getDebugData() const {
+  if (menuState_ != MenuState::Closed) {
+    return {{"menu_active", true}};
+  }
+  if (mode_ == Mode::DX) {
+    return dxPanel_.getDebugData();
+  }
+  return satPanel_.getDebugData();
 }

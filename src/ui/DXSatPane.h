@@ -3,6 +3,7 @@
 #include "../core/HamClockState.h"
 #include "../core/OrbitPredictor.h"
 #include "../core/SatelliteManager.h"
+#include "../core/WeatherData.h"
 #include "DXPanel.h"
 #include "FontManager.h"
 #include "SatPanel.h"
@@ -20,7 +21,8 @@ public:
 
   DXSatPane(int x, int y, int w, int h, FontManager &fontMgr,
             TextureManager &texMgr, std::shared_ptr<HamClockState> state,
-            SatelliteManager &satMgr);
+            SatelliteManager &satMgr,
+            std::shared_ptr<WeatherStore> weatherStore);
   ~DXSatPane() override;
 
   // Set observer location for orbit predictions.
@@ -52,9 +54,13 @@ public:
 
   void setTheme(const std::string &theme) override {
     Widget::setTheme(theme);
-    dxPanel_.setTheme(theme);
     satPanel_.setTheme(theme);
   }
+
+  std::string getName() const override { return "DXSatPane"; }
+  std::vector<std::string> getActions() const override;
+  SDL_Rect getActionRect(const std::string &action) const override;
+  nlohmann::json getDebugData() const override;
 
 private:
   // Menu has two views: the SAT options menu and the satellite list

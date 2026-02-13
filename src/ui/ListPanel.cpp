@@ -134,3 +134,10 @@ void ListPanel::onResize(int x, int y, int w, int h) {
   rowFontSize_ = cat->ptSize(FontStyle::Fast);
   destroyCache();
 }
+
+nlohmann::json ListPanel::getDebugData() const {
+  nlohmann::json j = nlohmann::json::object();
+  j["title"] = title_;
+  j["rows"] = rows_;
+  return j;
+}

@@ -18,6 +18,8 @@ struct AppConfig {
   // Appearance
   SDL_Color callsignColor = {255, 165, 0, 255}; // default orange
   std::string theme = "default";
+  bool mapNightLights = true;
+  bool useMetric = true;
 
   // Pane widget selection (top bar panes 1–3)
   // Pane widget selection (rotation sets)
@@ -42,6 +44,11 @@ struct AppConfig {
   std::string sdoWavelength = "0193";
   bool sdoGrayline = false;
   bool sdoShowMovie = false;
+
+  // PSK Reporter
+  bool pskOfDe = true;    // true if spots OF de (de is sender), false if BY de
+  bool pskUseCall = true; // true if filter by callsign, false if by grid
+  int pskMaxAge = 30;     // minutes
 };
 
 class ConfigManager {

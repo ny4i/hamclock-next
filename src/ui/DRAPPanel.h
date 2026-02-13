@@ -5,6 +5,8 @@
 #include "TextureManager.h"
 #include "Widget.h"
 
+#include <string>
+
 class DRAPPanel : public Widget {
 public:
   DRAPPanel(int x, int y, int w, int h, FontManager &fontMgr,
@@ -18,6 +20,7 @@ private:
   TextureManager &texMgr_;
   DRAPProvider &provider_;
 
-  bool imageReady_ = false;
+  bool dataReady_ = false;
   uint32_t lastFetch_ = 0;
+  std::string currentValue_;
 };

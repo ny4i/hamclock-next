@@ -4,13 +4,24 @@ cmake_minimum_required(VERSION 3.18)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Compat for old FetchContent deps")
 
 project(HamClock-Next
-    VERSION 0.1.0
+    VERSION 0.5.0
     LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_compile_definitions(HAMCLOCK_VERSION="${PROJECT_VERSION}")
+
+# --- Build Options ---
+option(ENABLE_DEBUG_API "Enable debug API endpoints and live view (increases CPU usage)" OFF)
+
+if(ENABLE_DEBUG_API)
+    add_compile_definitions(ENABLE_DEBUG_API)
+    message(STATUS "Debug API enabled (live view, debug endpoints)")
+else()
+    message(STATUS "Debug API disabled (production build)")
+endif()
 
 # --- System Libraries ---
 
@@ -31,6 +42,9 @@ find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(SDL2_TTF REQUIRED IMPORTED_TARGET SDL2_ttf)
 pkg_check_modules(SDL2_IMAGE REQUIRED IMPORTED_TARGET SDL2_image)
+
+# SQLite3
+pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 
 # --- Header-only / FetchContent Libraries ---
 
@@ -72,16 +86,27 @@ if(NOT libpredict_POPULATED)
     add_subdirectory(${libpredict_SOURCE_DIR}/src ${libpredict_BINARY_DIR}/src)
 endif()
 
-FetchContent_MakeAvailable(nlohmann_json httplib)
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.12.0
+    GIT_SHALLOW    TRUE
+)
+
+FetchContent_MakeAvailable(nlohmann_json httplib spdlog)
 
 # --- Application Target ---
 
 add_executable(hamclock-next
     src/main.cpp
+    src/core/Logger.cpp
     src/core/ConfigManager.cpp
+    src/core/DatabaseManager.cpp
     src/core/OrbitPredictor.cpp
+    src/core/DXClusterData.cpp
     src/core/SatelliteManager.cpp
     src/core/PrefixManager.cpp
+    src/core/CitiesManager.cpp
     src/network/NetworkManager.cpp
     src/network/WebServer.cpp
     src/services/NOAAProvider.cpp
@@ -98,9 +123,13 @@ add_executable(hamclock-next
     src/services/MoonProvider.cpp
     src/services/SDOProvider.cpp
     src/services/WeatherProvider.cpp
+    src/services/CallbookProvider.cpp
+    src/services/DstProvider.cpp
+    src/services/SantaProvider.cpp
     src/ui/ActivityPanels.cpp
     src/ui/ADIFPanel.cpp
     src/ui/AuroraPanel.cpp
+    src/ui/AuroraGraphPanel.cpp
     src/ui/DXClusterPanel.cpp
     src/ui/DXClusterSetup.cpp
     src/ui/BandConditionsPanel.cpp
@@ -129,6 +158,11 @@ add_executable(hamclock-next
     src/ui/SpaceWeatherPanel.cpp
     src/ui/TimePanel.cpp
     src/ui/WidgetSelector.cpp
+    src/ui/CallbookPanel.cpp
+    src/ui/DstPanel.cpp
+    src/ui/WatchlistPanel.cpp
+    src/ui/EMEToolPanel.cpp
+    src/ui/SantaPanel.cpp
 )
 
 target_include_directories(hamclock-next PRIVATE
@@ -146,6 +180,22 @@ target_link_libraries(hamclock-next PRIVATE
     predict
     Threads::Threads
     httplib::httplib
+    spdlog::spdlog
+    PkgConfig::SQLITE3
 )
 
-# --- No assets to copy (now embedded) ---
+# --- Custom targets for data updates ---
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_custom_target(update-prefixes
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/update_prefixes.py
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Updating prefix database from country-files.com"
+    )
+    add_custom_target(update-cities
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/update_cities.py
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Updating city database from geonames.org"
+    )
+    add_custom_target(update-data DEPENDS update-prefixes update-cities)
+endif()

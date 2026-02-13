@@ -1,13 +1,19 @@
 #include "MoonProvider.h"
-#include <cmath>
+#include "../core/Logger.h"
 #include <ctime>
+#include <iomanip>
+#include <nlohmann/json.hpp>
+#include <sstream>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-MoonProvider::MoonProvider(std::shared_ptr<MoonStore> store)
-    : store_(std::move(store)) {}
+using json = nlohmann::json;
+
+MoonProvider::MoonProvider(NetworkManager &net,
+                           std::shared_ptr<MoonStore> store)
+    : net_(net), store_(std::move(store)) {}
 
 void MoonProvider::update(double lat, double lon) {
   (void)lat;
@@ -15,53 +21,62 @@ void MoonProvider::update(double lat, double lon) {
 
   auto now = std::chrono::system_clock::now();
   std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+  std::tm utc{};
+  gmtime_r(&now_c, &utc);
 
-  // Base date: New Moon on Jan 6, 2000, 18:14 UTC
-  struct tm base_tm = {};
-  base_tm.tm_year = 100; // 2000
-  base_tm.tm_mon = 0;    // Jan
-  base_tm.tm_mday = 6;
-  base_tm.tm_hour = 18;
-  base_tm.tm_min = 14;
-  base_tm.tm_isdst = 0;
+  // NASA Dial-a-Moon API prefers YYYY-MM-DDTHH:00
+  std::stringstream ss;
+  ss << std::put_time(&utc, "%Y-%m-%dT%H:00");
+  std::string isoDate = ss.str();
 
-  // timegm is a non-standard but widely available POSIX function (including
-  // Linux) For Windows, _mkgmtime could be used, but this project target is
-  // Linux.
-  std::time_t base_c = timegm(&base_tm);
+  std::string url = "https://svs.gsfc.nasa.gov/api/dialamoon/" + isoDate;
 
-  double lunarCycle = 29.530588853;
-  double diffSecs = difftime(now_c, base_c);
-  double ageDays = std::fmod(diffSecs / 86400.0, lunarCycle);
-  if (ageDays < 0)
-    ageDays += lunarCycle;
+  auto store = store_;
+  net_.fetchAsync(url, [isoDate, store](std::string body) {
+    if (body.empty()) {
+      LOG_E("MoonProvider", "Failed to fetch NASA data for {}", isoDate);
+      return;
+    }
 
-  MoonData data;
-  data.phase = ageDays / lunarCycle;
-  // Illumination: 0 at New (0.0), 100 at Full (0.5)
-  data.illumination = 100.0 * (0.5 * (1.0 - std::cos(2.0 * M_PI * data.phase)));
+    try {
+      auto j = json::parse(body);
+      MoonData data;
 
-  if (data.phase < 0.03 || data.phase > 0.97)
-    data.phaseName = "New";
-  else if (data.phase < 0.22)
-    data.phaseName = "Waxing Cres";
-  else if (data.phase < 0.28)
-    data.phaseName = "First Qtr";
-  else if (data.phase < 0.47)
-    data.phaseName = "Waxing Gib";
-  else if (data.phase < 0.53)
-    data.phaseName = "Full";
-  else if (data.phase < 0.72)
-    data.phaseName = "Waning Gib";
-  else if (data.phase < 0.78)
-    data.phaseName = "Third Qtr";
-  else
-    data.phaseName = "Waning Cres";
+      // Dial-a-Moon phase is percentage (0-100), convert to 0-1 (normalized)
+      // Note: Dial-a-Moon 'phase' is illumination percentage.
+      data.illumination = j.value("phase", 0.0);
+      double age = j.value("age", 0.0); // Days since new moon
+      double cycle = 29.53;
+      data.phase = age / cycle;
 
-  // Placeholder Az/El
-  data.azimuth = 0.0;
-  data.elevation = 0.0;
+      data.imageUrl = j["image"]["url"].get<std::string>();
+      data.posangle = j.value("posangle", 0.0);
 
-  data.valid = true;
-  store_->update(data);
+      // Phase naming
+      if (data.illumination < 2.0)
+        data.phaseName = "New";
+      else if (data.illumination > 98.0)
+        data.phaseName = "Full";
+      else {
+        bool waxing = age < (cycle / 2.0);
+        if (data.illumination < 45.0)
+          data.phaseName = waxing ? "Waxing Cres" : "Waning Cres";
+        else if (data.illumination < 55.0)
+          data.phaseName = waxing ? "First Qtr" : "Third Qtr";
+        else
+          data.phaseName = waxing ? "Waxing Gib" : "Waning Gib";
+      }
+
+      data.azimuth = 0.0;
+      data.elevation = 0.0;
+      data.valid = true;
+      store->update(data);
+
+      LOG_I("MoonProvider", "Updated for {} ({:.1f}% illum, {})", isoDate,
+            data.illumination, data.phaseName);
+
+    } catch (const std::exception &e) {
+      LOG_E("MoonProvider", "JSON error: {}", e.what());
+    }
+  });
 }

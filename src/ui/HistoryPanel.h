@@ -2,6 +2,7 @@
 
 #include "../core/HistoryData.h"
 #include "FontManager.h"
+#include "TextureManager.h"
 #include "Widget.h"
 #include <memory>
 #include <string>
@@ -9,7 +10,7 @@
 class HistoryPanel : public Widget {
 public:
   HistoryPanel(int x, int y, int w, int h, FontManager &fontMgr,
-               std::shared_ptr<HistoryStore> store,
+               TextureManager &texMgr, std::shared_ptr<HistoryStore> store,
                const std::string &seriesName);
 
   void update() override;
@@ -17,6 +18,7 @@ public:
 
 private:
   FontManager &fontMgr_;
+  TextureManager &texMgr_;
   std::shared_ptr<HistoryStore> store_;
   std::string seriesName_;
   HistorySeries currentSeries_;

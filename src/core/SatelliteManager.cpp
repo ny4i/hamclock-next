@@ -1,8 +1,8 @@
 #include "SatelliteManager.h"
+#include "Logger.h"
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <cstdlib>
 #include <sstream>
 
@@ -25,15 +25,13 @@ void SatelliteManager::fetch(bool force) {
       return;
   }
 
-  std::fprintf(stderr,
-               "SatelliteManager: fetching TLE data from celestrak...\n");
+  LOG_I("SatelliteManager", "Fetching TLE data from celestrak...");
 
   net_.fetchAsync(
       TLE_URL,
       [this](std::string response) {
         if (response.empty()) {
-          std::fprintf(stderr,
-                       "SatelliteManager: fetch failed (empty response)\n");
+          LOG_E("SatelliteManager", "Fetch failed (empty response)");
           return;
         }
         parse(response);
@@ -86,8 +84,7 @@ void SatelliteManager::parse(const std::string &raw) {
     result.push_back(std::move(tle));
   }
 
-  std::fprintf(stderr, "SatelliteManager: parsed %zu satellites\n",
-               result.size());
+  LOG_I("SatelliteManager", "Parsed {} satellites", result.size());
 
   std::lock_guard<std::mutex> lock(mutex_);
   satellites_ = std::move(result);

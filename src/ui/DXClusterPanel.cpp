@@ -8,38 +8,100 @@ DXClusterPanel::DXClusterPanel(int x, int y, int w, int h, FontManager &fontMgr,
 
 void DXClusterPanel::update() {
   auto data = store_->get();
-  if (data.lastUpdate != lastUpdate_) {
-    std::vector<std::string> rows;
+  bool dataChanged = (data.lastUpdate != lastUpdate_);
 
-    // Most recent first
-    auto spots = data.spots;
-    std::reverse(spots.begin(), spots.end());
-
-    for (const auto &spot : spots) {
-      std::stringstream ss;
-      // Format: "14025.0 K1ABC"
-      ss << std::fixed << std::setprecision(1) << std::setw(8) << spot.freqKhz
-         << " " << std::left << std::setw(12) << spot.txCall;
-
-      // Add time if we have room, or rx call
-      // For now just freq and call
-      rows.push_back(ss.str());
-      if (rows.size() >= 15)
-        break;
-    }
-
-    if (rows.empty()) {
-      if (data.connected) {
-        rows.push_back("Waiting for spots...");
-      } else {
-        rows.push_back(data.statusMsg.empty() ? "Disconnected"
-                                              : data.statusMsg);
-      }
-    }
-
-    setRows(rows);
+  if (dataChanged) {
+    rebuildRows(data);
     lastUpdate_ = data.lastUpdate;
   }
+
+  // Re-render visible rows if data changed or scrolled (though ListPanel
+  // handles its own render tick, we update contents here)
+  if (dataChanged) {
+    // Ensure scroll offset is valid
+    if (allRows_.empty()) {
+      scrollOffset_ = 0;
+    } else {
+      int maxScroll = std::max(0, (int)allRows_.size() - MAX_VISIBLE_ROWS);
+      scrollOffset_ = std::min(scrollOffset_, maxScroll);
+    }
+
+    // Update ListPanel rows
+    std::vector<std::string> visible;
+    if (allRows_.empty()) {
+      visible.push_back(
+          data.connected
+              ? "Waiting for spots..."
+              : (data.statusMsg.empty() ? "Disconnected" : data.statusMsg));
+    } else {
+      for (int i = 0; i < MAX_VISIBLE_ROWS; ++i) {
+        if (scrollOffset_ + i < (int)allRows_.size()) {
+          visible.push_back(allRows_[scrollOffset_ + i]);
+        }
+      }
+    }
+    setRows(visible);
+  }
+}
+
+void DXClusterPanel::rebuildRows(const DXClusterData &data) {
+  allRows_.clear();
+  auto spots = data.spots;
+  // Most recent first
+  std::reverse(spots.begin(), spots.end());
+
+  for (const auto &spot : spots) {
+    std::stringstream ss;
+    // Format: "14025.0 K1ABC      5m"
+    // Freq: 8 chars
+    // Call: 11 chars
+    // Age:  4 chars (right aligned)
+    ss << std::fixed << std::setprecision(1) << std::setw(8) << spot.freqKhz
+       << " " << std::left << std::setw(11) << spot.txCall << std::right
+       << std::setw(4) << formatAge(spot.spottedAt);
+    allRows_.push_back(ss.str());
+  }
+}
+
+std::string DXClusterPanel::formatAge(
+    const std::chrono::system_clock::time_point &spottedAt) const {
+  auto now = std::chrono::system_clock::now();
+  auto age =
+      std::chrono::duration_cast<std::chrono::minutes>(now - spottedAt).count();
+
+  if (age < 0)
+    return "0m"; // Future spot?
+  if (age < 60)
+    return std::to_string(age) + "m";
+  return std::to_string(age / 60) + "h";
+}
+
+bool DXClusterPanel::onMouseWheel(int scrollY) {
+  if (allRows_.empty())
+    return false;
+
+  int maxScroll = std::max(0, (int)allRows_.size() - MAX_VISIBLE_ROWS);
+  int newOffset = scrollOffset_ - scrollY; // Scroll up decreases offset
+
+  if (newOffset < 0)
+    newOffset = 0;
+  if (newOffset > maxScroll)
+    newOffset = maxScroll;
+
+  if (newOffset != scrollOffset_) {
+    scrollOffset_ = newOffset;
+
+    // Immediate update of visible rows
+    std::vector<std::string> visible;
+    for (int i = 0; i < MAX_VISIBLE_ROWS; ++i) {
+      if (scrollOffset_ + i < (int)allRows_.size()) {
+        visible.push_back(allRows_[scrollOffset_ + i]);
+      }
+    }
+    setRows(visible);
+    return true;
+  }
+  return false;
 }
 
 bool DXClusterPanel::onMouseUp(int mx, int my, Uint16 /*mod*/) {
@@ -48,4 +110,29 @@ bool DXClusterPanel::onMouseUp(int mx, int my, Uint16 /*mod*/) {
     return true;
   }
   return false;
+}
+
+std::vector<std::string> DXClusterPanel::getActions() const {
+  return {"open_setup", "scroll_up", "scroll_down"};
+}
+
+SDL_Rect DXClusterPanel::getActionRect(const std::string &action) const {
+  if (action == "open_setup") {
+    // Bottom half triggers setup
+    return {x_, y_ + height_ / 2, width_, height_ / 2};
+  }
+  return {0, 0, 0, 0};
+}
+
+nlohmann::json DXClusterPanel::getDebugData() const {
+  nlohmann::json j;
+  auto data = store_->get();
+  j["connected"] = data.connected;
+  j["spotCount"] = data.spots.size();
+  j["scrollOffset"] = scrollOffset_;
+  if (!data.spots.empty()) {
+    j["lastSpotFreq"] = data.spots.back().freqKhz;
+    j["lastSpotCall"] = data.spots.back().txCall;
+  }
+  return j;
 }

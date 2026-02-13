@@ -5,13 +5,14 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
 #include <ctime>
 
 LocalPanel::LocalPanel(int x, int y, int w, int h, FontManager &fontMgr,
-                       std::shared_ptr<HamClockState> state)
-    : Widget(x, y, w, h), fontMgr_(fontMgr), state_(std::move(state)) {}
+                       std::shared_ptr<HamClockState> state,
+                       std::shared_ptr<WeatherStore> weatherStore)
+    : Widget(x, y, w, h), fontMgr_(fontMgr), state_(std::move(state)),
+      weatherStore_(std::move(weatherStore)) {}
 
 void LocalPanel::destroyCache() {
   for (int i = 0; i < kNumLines; ++i) {
@@ -57,13 +58,6 @@ void LocalPanel::update() {
                 utc.tm_mday, kMonths[utc.tm_mon], 1900 + utc.tm_year);
   lineText_[2] = buf;
 
-  std::snprintf(buf, sizeof(buf), "%s  %.1f%c %.1f%c", state_->deGrid.c_str(),
-                std::fabs(state_->deLocation.lat),
-                state_->deLocation.lat >= 0 ? 'N' : 'S',
-                std::fabs(state_->deLocation.lon),
-                state_->deLocation.lon >= 0 ? 'E' : 'W');
-  lineText_[3] = buf;
-
   // Sunrise / Sunset
   int doy = utc.tm_yday + 1;
   SunTimes st = Astronomy::calculateSunTimes(state_->deLocation.lat,
@@ -89,7 +83,29 @@ void LocalPanel::update() {
   } else {
     std::snprintf(buf, sizeof(buf), "No rise/set");
   }
-  lineText_[4] = buf;
+  lineText_[3] = buf;
+
+  // Weather data
+  if (weatherStore_) {
+    WeatherData wd = weatherStore_->get();
+    if (wd.valid) {
+      char wBuf[64];
+      float temp = useMetric_ ? wd.temp : (wd.temp * 1.8f + 32.0f);
+      const char *tempUnit = useMetric_ ? "C" : "F";
+      std::snprintf(wBuf, sizeof(wBuf), "%.0f %s  %d%%", temp, tempUnit,
+                    wd.humidity);
+      lineText_[4] = wBuf;
+
+      std::snprintf(wBuf, sizeof(wBuf), "%.0f hPa", wd.pressure);
+      lineText_[5] = wBuf;
+    } else {
+      lineText_[4] = "";
+      lineText_[5] = "";
+    }
+  } else {
+    lineText_[4] = "";
+    lineText_[5] = "";
+  }
 }
 
 void LocalPanel::render(SDL_Renderer *renderer) {
@@ -118,11 +134,12 @@ void LocalPanel::render(SDL_Renderer *renderer) {
 
   // Orange theme colors
   SDL_Color colors[kNumLines] = {
-      {255, 165, 0, 255}, // "DE:" orange
-      {255, 165, 0, 255}, // Local time orange (large)
-      {0, 200, 255, 255}, // Date cyan
-      {0, 255, 128, 255}, // Grid/coords green
-      {255, 165, 0, 255}, // Rise/set orange
+      {0, 200, 255, 255},   // "DE:" cyan
+      {255, 165, 0, 255},   // Local time orange (large)
+      {255, 255, 255, 255}, // Date white
+      {0, 255, 128, 255},   // Rise/set green
+      {255, 165, 0, 255},   // Weather orange
+      {255, 165, 0, 255},   // Weather orange
   };
 
   int curY = y_ + pad;
@@ -177,12 +194,30 @@ void LocalPanel::onResize(int x, int y, int w, int h) {
   auto *cat = fontMgr_.catalog();
   int fast = cat->ptSize(FontStyle::Fast);
   int fastBold = cat->ptSize(FontStyle::FastBold);
-  int clockPt = std::clamp(h / 4, 6, cat->ptSize(FontStyle::SmallBold));
+  int clockPt = std::clamp(static_cast<int>(height_ * 0.25f), 24, 60);
+
   lineFontSize_[0] = fast;     // "DE:" label
   lineFontSize_[1] = clockPt;  // Local time (large)
-  lineFontSize_[2] = fastBold; // Date
-  lineFontSize_[3] = fast;     // Grid/coords
-  lineFontSize_[4] = fast;     // Rise/set
-  secFontSize_ = fastBold;     // Seconds (smaller)
+  lineFontSize_[2] = fast;     // Date
+  lineFontSize_[3] = fastBold; // Rise/set
+  lineFontSize_[4] = fast;     // Weather 1
+  lineFontSize_[5] = fast;     // Weather 2
+  secFontSize_ = fastBold;     // Seconds (superscript)
   destroyCache();
+}
+
+nlohmann::json LocalPanel::getDebugData() const {
+  nlohmann::json json;
+  json["weather"] = nullptr;
+  if (weatherStore_) {
+    WeatherData wd = weatherStore_->get();
+    if (wd.valid) {
+      json["weather"] = {
+          {"temp", wd.temp},         {"humidity", wd.humidity},
+          {"pressure", wd.pressure}, {"windSpeed", wd.windSpeed},
+          {"windDeg", wd.windDeg},   {"description", wd.description},
+      };
+    }
+  }
+  return json;
 }

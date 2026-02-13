@@ -1,4 +1,6 @@
 #include "DXClusterProvider.h"
+#include "../core/HamClockState.h"
+#include "../core/Logger.h"
 #include "../core/PrefixManager.h"
 #include <arpa/inet.h>
 #include <cstring>
@@ -8,8 +10,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-DXClusterProvider::DXClusterProvider(std::shared_ptr<DXClusterDataStore> store)
-    : store_(store) {}
+DXClusterProvider::DXClusterProvider(std::shared_ptr<DXClusterDataStore> store,
+                                     PrefixManager &pm,
+                                     std::shared_ptr<WatchlistStore> watchlist,
+                                     std::shared_ptr<WatchlistHitStore> hits,
+                                     HamClockState *state)
+    : store_(store), pm_(pm), watchlist_(watchlist), hits_(hits),
+      state_(state) {}
 
 DXClusterProvider::~DXClusterProvider() { stop(); }
 
@@ -54,13 +61,27 @@ void DXClusterProvider::run() {
 
 void DXClusterProvider::runTelnet(const std::string &host, int port,
                                   const std::string &login) {
+  LOG_I("DXCluster", "Connecting to {}:{}", host, port);
+  if (state_) {
+    auto &s = state_->services["DXCluster"];
+    s.ok = false;
+    s.lastError = "Connecting...";
+  }
+
   int sock = socket(AF_INET, SOCK_STREAM, 0);
-  if (sock < 0)
+  if (sock < 0) {
+    LOG_E("DXCluster", "Failed to create socket");
+    if (state_)
+      state_->services["DXCluster"].lastError = "Socket error";
     return;
+  }
 
   // Set non-blocking for connect timeout if needed, but for now just simple
   struct hostent *he = gethostbyname(host.c_str());
   if (!he) {
+    LOG_E("DXCluster", "Could not resolve {}", host);
+    if (state_)
+      state_->services["DXCluster"].lastError = "DNS failed";
     close(sock);
     return;
   }
@@ -70,11 +91,10 @@ void DXClusterProvider::runTelnet(const std::string &host, int port,
   server_addr.sin_port = htons(port);
   std::memcpy(&server_addr.sin_addr, he->h_addr_list[0], he->h_length);
 
-  store_->setConnected(false, "Connecting to " + host + "...");
-
   if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-    std::fprintf(stderr, "DXCluster: connect to %s failed: %s\n", host.c_str(),
-                 std::strerror(errno));
+    LOG_E("DXCluster", "Connect to {} failed: {}", host, std::strerror(errno));
+    if (state_)
+      state_->services["DXCluster"].lastError = "Connect failed";
     close(sock);
     return;
   }
@@ -82,7 +102,9 @@ void DXClusterProvider::runTelnet(const std::string &host, int port,
   // Set non-blocking for read
   fcntl(sock, F_SETFL, O_NONBLOCK);
 
-  std::fprintf(stderr, "DXCluster: connected to %s\n", host.c_str());
+  LOG_I("DXCluster", "Connected to {}", host);
+  if (state_)
+    state_->services["DXCluster"].lastError = "Connected";
   store_->setConnected(true, "Connected to " + host);
 
   std::string buffer;
@@ -112,7 +134,11 @@ void DXClusterProvider::runTelnet(const std::string &host, int port,
       char tmp[1024];
       ssize_t n = recv(sock, tmp, sizeof(tmp) - 1, 0);
       if (n <= 0) {
-        std::fprintf(stderr, "DXCluster: connection lost (n=%zd)\n", n);
+        LOG_W("DXCluster", "Connection lost");
+        if (state_) {
+          state_->services["DXCluster"].ok = false;
+          state_->services["DXCluster"].lastError = "Connection lost";
+        }
         break; // Error or closed
       }
 
@@ -138,6 +164,11 @@ void DXClusterProvider::runTelnet(const std::string &host, int port,
                   std::string::npos) { // Spot line also means we are in
             if (!loggedIn) {
               loggedIn = true;
+              if (state_) {
+                auto &s = state_->services["DXCluster"];
+                s.ok = true;
+                s.lastSuccess = std::chrono::system_clock::now();
+              }
               store_->setConnected(true, "Logged in as " + login);
             }
             if (!initialRequestSent) {
@@ -278,17 +309,36 @@ void DXClusterProvider::processLine(const std::string &line) {
 
         // Map location
         LatLong ll;
-        if (PrefixManager::findLocation(spot.txCall, ll)) {
+        if (pm_.findLocation(spot.txCall, ll)) {
           spot.txLat = ll.lat;
           spot.txLon = ll.lon;
         }
-        if (PrefixManager::findLocation(spot.rxCall, ll)) {
+        if (pm_.findLocation(spot.rxCall, ll)) {
           spot.rxLat = ll.lat;
           spot.rxLon = ll.lon;
         }
 
         store_->addSpot(spot);
+
+        // Watchlist Check
+        if (watchlist_ && hits_ && watchlist_->contains(spot.txCall)) {
+          WatchlistHit hit;
+          hit.call = spot.txCall;
+          hit.freqKhz = spot.freqKhz;
+          hit.mode = "DX"; // Cluster usually doesn't specify mode clearly
+                           // without parsing comment
+          hit.source = "Cluster";
+          hit.time = spot.spottedAt;
+          hits_->addHit(hit);
+        }
       }
     }
   }
+}
+
+nlohmann::json DXClusterProvider::getDebugData() const {
+  nlohmann::json j;
+  j["running"] = running_.load();
+  j["config_host"] = config_.dxClusterHost;
+  return j;
 }

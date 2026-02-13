@@ -73,6 +73,8 @@ bool ConfigManager::load(AppConfig &config) const {
       config.callsignColor = hexToColor(hexColor, config.callsignColor);
     }
     config.theme = ap.value("theme", "default");
+    config.mapNightLights = ap.value("map_night_lights", true);
+    config.useMetric = ap.value("use_metric", true);
   }
 
   // Pane widget selection
@@ -114,7 +116,7 @@ bool ConfigManager::load(AppConfig &config) const {
     config.selectedSatellite = pn.value("satellite", "");
   }
 
-  // DX Cluster
+  // DX Cluster & PSK Reporter
   if (json.contains("dx_cluster")) {
     auto &dxc = json["dx_cluster"];
     config.dxClusterEnabled = dxc.value("enabled", true);
@@ -122,6 +124,13 @@ bool ConfigManager::load(AppConfig &config) const {
     config.dxClusterPort = dxc.value("port", 7300);
     config.dxClusterLogin = dxc.value("login", "");
     config.dxClusterUseWSJTX = dxc.value("use_wsjtx", false);
+  }
+
+  if (json.contains("psk_reporter")) {
+    auto &psk = json["psk_reporter"];
+    config.pskOfDe = psk.value("of_de", true);
+    config.pskUseCall = psk.value("use_call", true);
+    config.pskMaxAge = psk.value("max_age", 30);
   }
 
   // Require at least a callsign to consider config valid
@@ -149,6 +158,8 @@ bool ConfigManager::save(const AppConfig &config) const {
 
   json["appearance"]["callsign_color"] = colorToHex(config.callsignColor);
   json["appearance"]["theme"] = config.theme;
+  json["appearance"]["map_night_lights"] = config.mapNightLights;
+  json["appearance"]["use_metric"] = config.useMetric;
 
   auto saveRotation = [&](const std::string &key,
                           const std::vector<WidgetType> &vec) {
@@ -173,6 +184,10 @@ bool ConfigManager::save(const AppConfig &config) const {
   json["dx_cluster"]["port"] = config.dxClusterPort;
   json["dx_cluster"]["login"] = config.dxClusterLogin;
   json["dx_cluster"]["use_wsjtx"] = config.dxClusterUseWSJTX;
+
+  json["psk_reporter"]["of_de"] = config.pskOfDe;
+  json["psk_reporter"]["use_call"] = config.pskUseCall;
+  json["psk_reporter"]["max_age"] = config.pskMaxAge;
 
   std::ofstream ofs(configPath_);
   if (!ofs) {

@@ -7,8 +7,10 @@
 #include <cstdio>
 
 DXPanel::DXPanel(int x, int y, int w, int h, FontManager &fontMgr,
-                 std::shared_ptr<HamClockState> state)
-    : Widget(x, y, w, h), fontMgr_(fontMgr), state_(std::move(state)) {}
+                 std::shared_ptr<HamClockState> state,
+                 std::shared_ptr<WeatherStore> weatherStore)
+    : Widget(x, y, w, h), fontMgr_(fontMgr), state_(std::move(state)),
+      weatherStore_(std::move(weatherStore)) {}
 
 void DXPanel::destroyCache() {
   for (int i = 0; i < kNumLines; ++i) {
@@ -28,6 +30,8 @@ void DXPanel::update() {
     lineText_[3].clear();
     lineText_[4].clear();
     lineText_[5].clear();
+    lineText_[6].clear();
+    lineText_[7].clear();
     return;
   }
 
@@ -48,16 +52,44 @@ void DXPanel::update() {
 
   double dist =
       Astronomy::calculateDistance(state_->deLocation, state_->dxLocation);
-  if (dist >= 1000.0) {
-    std::snprintf(buf, sizeof(buf), "Dist: %.0f km", dist);
+  if (useMetric_) {
+    if (dist >= 1000.0) {
+      std::snprintf(buf, sizeof(buf), "Dist: %.0f km", dist);
+    } else {
+      std::snprintf(buf, sizeof(buf), "Dist: %.1f km", dist);
+    }
   } else {
-    std::snprintf(buf, sizeof(buf), "Dist: %.1f km", dist);
+    double miles = dist * 0.621371;
+    if (miles >= 1000.0) {
+      std::snprintf(buf, sizeof(buf), "Dist: %.0f mi", miles);
+    } else {
+      std::snprintf(buf, sizeof(buf), "Dist: %.1f mi", miles);
+    }
   }
   lineText_[4] = buf;
+  lineText_[5].clear(); // Was Miles equivalent, now empty
 
-  // Miles equivalent
-  std::snprintf(buf, sizeof(buf), "      %.0f mi", dist * 0.621371);
-  lineText_[5] = buf;
+  // Weather
+  if (weatherStore_) {
+    auto wd = weatherStore_->get();
+    if (wd.valid) {
+      char wBuf[64];
+      float temp = useMetric_ ? wd.temp : (wd.temp * 1.8f + 32.0f);
+      const char *tempUnit = useMetric_ ? "C" : "F";
+      std::snprintf(wBuf, sizeof(wBuf), "%.0f %s  %d%%", temp, tempUnit,
+                    wd.humidity);
+      lineText_[6] = wBuf;
+
+      std::snprintf(wBuf, sizeof(wBuf), "%.0f hPa", wd.pressure);
+      lineText_[7] = wBuf;
+    } else {
+      lineText_[6].clear();
+      lineText_[7].clear();
+    }
+  } else {
+    lineText_[6].clear();
+    lineText_[7].clear();
+  }
 }
 
 void DXPanel::render(SDL_Renderer *renderer) {
@@ -89,6 +121,8 @@ void DXPanel::render(SDL_Renderer *renderer) {
       {255, 255, 0, 255},   // Bearing yellow
       {0, 200, 255, 255},   // Distance cyan
       {0, 200, 255, 255},   // Miles cyan
+      {0, 255, 0, 255},     // Weather 1 (Green)
+      {0, 255, 0, 255},     // Weather 2 (Green)
   };
 
   int curY = y_ + pad;
@@ -126,5 +160,26 @@ void DXPanel::onResize(int x, int y, int w, int h) {
   lineFontSize_[3] = cat->ptSize(FontStyle::Fast); // Bearing
   lineFontSize_[4] = cat->ptSize(FontStyle::Fast); // Distance
   lineFontSize_[5] = cat->ptSize(FontStyle::Fast); // Miles
+  lineFontSize_[6] = cat->ptSize(FontStyle::Fast); // Weather 1
+  lineFontSize_[7] = cat->ptSize(FontStyle::Fast); // Weather 2
+  lineFontSize_[7] = cat->ptSize(FontStyle::Fast); // Weather 2
   destroyCache();
+}
+
+nlohmann::json DXPanel::getDebugData() const {
+  nlohmann::json json;
+  json["weather"] = nullptr;
+  json["has_target"] = state_->dxActive;
+
+  if (state_->dxActive && weatherStore_) {
+    WeatherData wd = weatherStore_->get();
+    if (wd.valid) {
+      json["weather"] = {
+          {"temp", wd.temp},         {"humidity", wd.humidity},
+          {"pressure", wd.pressure}, {"windSpeed", wd.windSpeed},
+          {"windDeg", wd.windDeg},   {"description", wd.description},
+      };
+    }
+  }
+  return json;
 }

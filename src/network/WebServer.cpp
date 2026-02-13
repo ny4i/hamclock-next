@@ -5,14 +5,27 @@
 
 #include "../core/ConfigManager.h"
 #include "../core/HamClockState.h"
-#include "../core/UIRegistry.h"
+#include "../core/SolarData.h"
+#include "../core/WatchlistStore.h"
 #include <httplib.h>
-#include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "../core/Logger.h"
+
+#ifdef ENABLE_DEBUG_API
+#include "../core/Astronomy.h"
+#include "../core/UIRegistry.h"
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#endif
+
 WebServer::WebServer(SDL_Renderer *renderer, AppConfig &cfg,
-                     HamClockState &state, int port)
-    : renderer_(renderer), cfg_(&cfg), state_(&state), port_(port) {}
+                     HamClockState &state, ConfigManager &cfgMgr,
+                     std::shared_ptr<WatchlistStore> watchlist,
+                     std::shared_ptr<SolarDataStore> solar, int port)
+    : renderer_(renderer), cfg_(&cfg), state_(&state), cfgMgr_(&cfgMgr),
+      watchlist_(watchlist), solar_(solar), port_(port) {}
 
 WebServer::~WebServer() { stop(); }
 
@@ -45,7 +58,8 @@ void WebServer::updateFrame() {
     return;
 
   uint32_t now = SDL_GetTicks();
-  if (now - lastCaptureTicks_ < 100)
+  // Throttle to 500ms (2 FPS) instead of 100ms (10 FPS) for lower CPU usage
+  if (now - lastCaptureTicks_ < 250)
     return;
   lastCaptureTicks_ = now;
 
@@ -76,11 +90,13 @@ void WebServer::run() {
   svrPtr_ = &svr;
 
   svr.Get("/", [](const httplib::Request &, httplib::Response &res) {
-    res.set_content(R"HTML(
+    std::string html = R"HTML(
 <!DOCTYPE html>
 <html>
 <head>
-    <title>HamClock-Next Live (v1.1)</title>
+    <title>HamClock-Next Live (v)HTML";
+    html += HAMCLOCK_VERSION;
+    html += R"HTML()</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { background: #000; color: #00ff00; text-align: center; font-family: monospace; margin: 0; padding: 10px; overflow: hidden; outline: none; }
@@ -105,18 +121,25 @@ void WebServer::run() {
         <img id="screen" src="/live.jpg" draggable="false">
     </div>
 
-    <div class="status">v0.1 | Type anywhere to send keys | Click screen for touch</div>
+    <div class="status">v)HTML";
+    html += HAMCLOCK_VERSION;
+    html += R"HTML( | Type anywhere to send keys | Click screen for touch</div>
 
     <script>
         const img = document.getElementById('screen');
         const kbd = document.getElementById('kbd-hidden');
+        
+        // Refresh rate in milliseconds (500ms = 2 FPS for lower CPU usage)
+        // Change to 1000 for 1 FPS (lower CPU usage)
+        // Change to 250 for 4 FPS (higher CPU usage)
+        const REFRESH_RATE = 500;
         
         function refresh() {
             const nextImg = new Image();
             nextImg.onload = () => { img.src = nextImg.src; };
             nextImg.src = '/live.jpg?t=' + Date.now();
         }
-        setInterval(refresh, 250);
+        setInterval(refresh, REFRESH_RATE);
 
         // Click anywhere to ensure input focus
         document.addEventListener('mousedown', function() {
@@ -155,8 +178,8 @@ void WebServer::run() {
     </script>
 </body>
 </html>
-)HTML",
-                    "text/html");
+)HTML";
+    res.set_content(html, "text/html");
   });
 
   svr.Get("/live.jpg", [this](const httplib::Request &,
@@ -261,6 +284,7 @@ void WebServer::run() {
     res.set_content("ok", "text/plain");
   });
 
+#ifdef ENABLE_DEBUG_API
   svr.Get("/debug/widgets",
           [](const httplib::Request &, httplib::Response &res) {
             auto snapshot = UIRegistry::getInstance().getSnapshot();
@@ -278,6 +302,7 @@ void WebServer::run() {
                 actions.push_back(a);
               }
               w["actions"] = actions;
+              w["data"] = info.data;
               j[id] = w;
             }
 
@@ -383,6 +408,63 @@ void WebServer::run() {
         res.set_content(out, "text/plain");
       });
 
+  svr.Get("/get_dx.txt", [this](const httplib::Request &,
+                                httplib::Response &res) {
+    if (!state_) {
+      res.status = 503;
+      return;
+    }
+    if (!state_->dxActive) {
+      res.set_content("DX not set\n", "text/plain");
+      return;
+    }
+    std::string out;
+    out += "DX_Grid     " + state_->dxGrid + "\n";
+    out += "DX_Lat      " + std::to_string(state_->dxLocation.lat) + "\n";
+    out += "DX_Lon      " + std::to_string(state_->dxLocation.lon) + "\n";
+    double dist =
+        Astronomy::calculateDistance(state_->deLocation, state_->dxLocation);
+    double brg =
+        Astronomy::calculateBearing(state_->deLocation, state_->dxLocation);
+    out += "DX_Dist_km  " + std::to_string(static_cast<int>(dist)) + "\n";
+    out += "DX_Bearing  " + std::to_string(static_cast<int>(brg)) + "\n";
+    res.set_content(out, "text/plain");
+  });
+
+  // Programmatic set DE/DX via lat/lon
+  svr.Get("/set_mappos",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            if (!state_) {
+              res.status = 503;
+              return;
+            }
+            if (!req.has_param("lat") || !req.has_param("lon")) {
+              res.status = 400;
+              res.set_content("missing lat/lon", "text/plain");
+              return;
+            }
+            double lat = std::stod(req.get_param_value("lat"));
+            double lon = std::stod(req.get_param_value("lon"));
+            std::string target = "dx"; // default
+            if (req.has_param("target"))
+              target = req.get_param_value("target");
+
+            if (target == "de") {
+              state_->deLocation = {lat, lon};
+              state_->deGrid = Astronomy::latLonToGrid(lat, lon);
+            } else {
+              state_->dxLocation = {lat, lon};
+              state_->dxGrid = Astronomy::latLonToGrid(lat, lon);
+              state_->dxActive = true;
+            }
+            nlohmann::json j;
+            j["target"] = target;
+            j["lat"] = lat;
+            j["lon"] = lon;
+            j["grid"] = Astronomy::latLonToGrid(lat, lon);
+            res.set_content(j.dump(), "application/json");
+          });
+
   svr.Get(
       "/debug/type", [](const httplib::Request &req, httplib::Response &res) {
         if (req.has_param("text")) {
@@ -457,7 +539,91 @@ void WebServer::run() {
             }
           });
 
-  std::clog << "WebServer: listening on port " << port_ << "..." << std::endl;
+  svr.Get("/set_config",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            if (req.has_param("call"))
+              cfg_->callsign = req.get_param_value("call");
+            if (req.has_param("grid"))
+              cfg_->grid = req.get_param_value("grid");
+            if (req.has_param("theme"))
+              cfg_->theme = req.get_param_value("theme");
+            if (req.has_param("lat"))
+              cfg_->lat = std::stod(req.get_param_value("lat"));
+            if (req.has_param("lon"))
+              cfg_->lon = std::stod(req.get_param_value("lon"));
+
+            if (cfgMgr_)
+              cfgMgr_->save(*cfg_);
+            res.set_content("ok", "text/plain");
+          });
+
+  svr.Get("/debug/watchlist/add",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            if (req.has_param("call") && watchlist_) {
+              watchlist_->add(req.get_param_value("call"));
+              res.set_content("ok", "text/plain");
+            } else {
+              res.status = 400;
+              res.set_content("missing call or watchlist store", "text/plain");
+            }
+          });
+
+  svr.Get("/debug/store/set_solar",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            if (solar_) {
+              SolarData data = solar_->get();
+              if (req.has_param("sfi"))
+                data.sfi = std::stoi(req.get_param_value("sfi"));
+              if (req.has_param("k"))
+                data.k_index = std::stoi(req.get_param_value("k"));
+              if (req.has_param("sn"))
+                data.sunspot_number = std::stoi(req.get_param_value("sn"));
+              data.valid = true;
+              solar_->set(data);
+              res.set_content("ok", "text/plain");
+            } else {
+              res.status = 503;
+              res.set_content("solar store not available", "text/plain");
+            }
+          });
+
+  svr.Get("/debug/performance",
+          [this](const httplib::Request &, httplib::Response &res) {
+            nlohmann::json j;
+            j["fps"] = state_->fps;
+            j["port"] = port_;
+            j["running_since"] = SDL_GetTicks() / 1000;
+            res.set_content(j.dump(2), "application/json");
+          });
+
+  svr.Get("/debug/logs", [](const httplib::Request &, httplib::Response &res) {
+    nlohmann::json j;
+    j["status"] = "OK";
+    j["info"] = "Logs are written to rotating file (~/.hamclock/hamclock.log) "
+                "and stderr (journalctl).";
+    res.set_content(j.dump(2), "application/json");
+  });
+
+  svr.Get("/debug/health", [this](const httplib::Request &,
+                                  httplib::Response &res) {
+    nlohmann::json j;
+    for (const auto &[name, status] : state_->services) {
+      nlohmann::json s;
+      s["ok"] = status.ok;
+      s["lastError"] = status.lastError;
+      if (status.lastSuccess.time_since_epoch().count() > 0) {
+        auto t = std::chrono::system_clock::to_time_t(status.lastSuccess);
+        std::stringstream ss;
+        ss << std::put_time(std::gmtime(&t), "%Y-%m-%d %H:%M:%S");
+        s["lastSuccess"] = ss.str();
+      }
+      j[name] = s;
+    }
+    res.set_content(j.dump(2), "application/json");
+  });
+#endif
+
+  LOG_I("WebServer", "Listening on port {}...", port_);
   svr.listen("0.0.0.0", port_);
   svrPtr_ = nullptr;
 }

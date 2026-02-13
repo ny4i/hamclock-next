@@ -1,13 +1,18 @@
 #pragma once
 
+#include "../core/AuroraHistoryStore.h"
 #include "../core/SolarData.h"
 #include "../network/NetworkManager.h"
 
 #include <memory>
 
+struct HamClockState;
+
 class NOAAProvider {
 public:
-  NOAAProvider(NetworkManager &net, std::shared_ptr<SolarDataStore> store);
+  NOAAProvider(NetworkManager &net, std::shared_ptr<SolarDataStore> store,
+               std::shared_ptr<AuroraHistoryStore> auroraStore = nullptr,
+               HamClockState *state = nullptr);
 
   void fetch();
 
@@ -19,13 +24,15 @@ private:
   void fetchMag();
   void fetchDST();
   void fetchAurora();
+  void fetchDRAP();
 
   static constexpr const char *K_INDEX_URL =
       "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json";
   static constexpr const char *SFI_URL =
       "https://services.swpc.noaa.gov/products/summary/10cm-flux.json";
   static constexpr const char *SN_URL =
-      "https://services.swpc.noaa.gov/products/noaa-sunspot-number.json";
+      "https://services.swpc.noaa.gov/json/solar-cycle/"
+      "predicted-solar-cycle.json";
   static constexpr const char *PLASMA_URL =
       "https://services.swpc.noaa.gov/products/solar-wind/plasma-5-minute.json";
   static constexpr const char *MAG_URL =
@@ -33,8 +40,12 @@ private:
   static constexpr const char *DST_URL =
       "https://services.swpc.noaa.gov/products/kyoto-dst.json";
   static constexpr const char *AURORA_URL =
-      "https://services.swpc.noaa.gov/text/aurora-nowcast-hemi-power.txt";
+      "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
+  static constexpr const char *DRAP_URL =
+      "https://services.swpc.noaa.gov/text/drap_global_frequencies.txt";
 
   NetworkManager &net_;
   std::shared_ptr<SolarDataStore> store_;
+  std::shared_ptr<AuroraHistoryStore> auroraStore_;
+  HamClockState *state_;
 };

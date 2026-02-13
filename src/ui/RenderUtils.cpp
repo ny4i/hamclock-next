@@ -143,6 +143,36 @@ void drawCircleOutline(SDL_Renderer *renderer, float x, float y, float radius,
   }
 }
 
+void drawTriangle(SDL_Renderer *renderer, float x1, float y1, float x2,
+                  float y2, float x3, float y3, SDL_Color color) {
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+  SDL_Vertex verts[3];
+  for (int i = 0; i < 3; ++i) {
+    verts[i].color = color;
+    verts[i].tex_coord = {0, 0};
+  }
+  verts[0].position = {x1, y1};
+  verts[1].position = {x2, y2};
+  verts[2].position = {x3, y3};
+  SDL_RenderGeometry(renderer, nullptr, verts, 3, nullptr, 0);
+#else
+  // Fill triangle fallback (primitive)
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  for (float i = 0; i <= 1.0f; i += 0.05f) {
+    SDL_RenderDrawLineF(renderer, x1 + (x2 - x1) * i, y1 + (y2 - y1) * i,
+                        x1 + (x3 - x1) * i, y1 + (y3 - y1) * i);
+  }
+#endif
+}
+
+void drawTriangleOutline(SDL_Renderer *renderer, float x1, float y1, float x2,
+                         float y2, float x3, float y3, SDL_Color color) {
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  SDL_RenderDrawLineF(renderer, x1, y1, x2, y2);
+  SDL_RenderDrawLineF(renderer, x2, y2, x3, y3);
+  SDL_RenderDrawLineF(renderer, x3, y3, x1, y1);
+}
+
 void drawPolyline(SDL_Renderer *renderer, const SDL_FPoint *points, int count,
                   float thickness, SDL_Color color, bool closed) {
   if (count < 2)

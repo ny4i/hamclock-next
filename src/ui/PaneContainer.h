@@ -30,6 +30,7 @@ public:
   }
   std::vector<std::string> getActions() const override;
   SDL_Rect getActionRect(const std::string &action) const override;
+  nlohmann::json getDebugData() const override;
 
   void setTheme(const std::string &theme) override {
     Widget::setTheme(theme);

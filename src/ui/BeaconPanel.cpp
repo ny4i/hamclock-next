@@ -2,6 +2,7 @@
 #include "../core/BeaconData.h"
 #include "../core/Theme.h"
 #include "FontCatalog.h"
+#include "RenderUtils.h"
 
 BeaconPanel::BeaconPanel(int x, int y, int w, int h, FontManager &fontMgr)
     : Widget(x, y, w, h), fontMgr_(fontMgr) {}
@@ -62,14 +63,12 @@ void BeaconPanel::render(SDL_Renderer *renderer) {
       int iconY = ry + rowH / 2;
       int triSize = 6; // Fixed small size like original
 
-      // Draw Triangle (Pointing Up)
-      SDL_Vertex verts[3];
-      verts[0] = {
-          {(float)iconX - triSize, (float)iconY + triSize}, bandColors[i], {0}};
-      verts[1] = {
-          {(float)iconX + triSize, (float)iconY + triSize}, bandColors[i], {0}};
-      verts[2] = {{(float)iconX, (float)iconY - triSize}, bandColors[i], {0}};
-      SDL_RenderGeometry(renderer, nullptr, verts, 3, nullptr, 0);
+      // Draw indicator (Triangle)
+      SDL_Color c = bandColors[i];
+      RenderUtils::drawTriangle(
+          renderer, (float)iconX - triSize, (float)iconY + triSize * 0.5f,
+          (float)iconX + triSize, (float)iconY + triSize * 0.5f, (float)iconX,
+          (float)iconY - triSize * 0.5f, c);
 
       // Frequency
       fontMgr_.drawText(renderer, freqs[i], x_ + 20, ry + rowH / 2,

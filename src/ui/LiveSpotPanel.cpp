@@ -6,10 +6,18 @@
 #include <cstring>
 
 LiveSpotPanel::LiveSpotPanel(int x, int y, int w, int h, FontManager &fontMgr,
+                             LiveSpotProvider &provider,
                              std::shared_ptr<LiveSpotDataStore> store)
-    : Widget(x, y, w, h), fontMgr_(fontMgr), store_(std::move(store)) {}
+    : Widget(x, y, w, h), fontMgr_(fontMgr), provider_(provider),
+      store_(std::move(store)) {}
 
 void LiveSpotPanel::update() {
+  uint32_t now = SDL_GetTicks();
+  if (now - lastFetch_ > 5 * 60 * 1000 || lastFetch_ == 0) { // 5 mins
+    lastFetch_ = now;
+    provider_.fetch();
+  }
+
   auto data = store_->get();
   if (!data.valid)
     return;

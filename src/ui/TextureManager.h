@@ -1,10 +1,10 @@
 #pragma once
 
+#include "../core/Logger.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
 #include <cmath>
-#include <cstdio>
 #include <map>
 #include <string>
 
@@ -28,8 +28,7 @@ public:
 
     SDL_Surface *surface = SDL_LoadBMP(path.c_str());
     if (!surface) {
-      std::fprintf(stderr, "TextureManager: failed to load %s: %s\n",
-                   path.c_str(), SDL_GetError());
+      LOG_E("TextureManager", "Failed to load {}: {}", path, SDL_GetError());
       return nullptr;
     }
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -48,8 +47,7 @@ public:
 
     SDL_Surface *surface = IMG_Load(path.c_str());
     if (!surface) {
-      std::fprintf(stderr, "TextureManager: failed to load %s: %s\n",
-                   path.c_str(), IMG_GetError());
+      LOG_E("TextureManager", "Failed to load {}: {}", path, IMG_GetError());
       return nullptr;
     }
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -70,30 +68,36 @@ public:
   // Load an image from memory (e.g. embedded assets).
   SDL_Texture *loadFromMemory(SDL_Renderer *renderer, const std::string &key,
                               const unsigned char *data, unsigned int size) {
-    // If it already exists, destroy old one before replacing
-    auto it = cache_.find(key);
-    if (it != cache_.end()) {
-      SDL_DestroyTexture(it->second);
-      cache_.erase(it);
-    }
-
     SDL_RWops *rw = SDL_RWFromConstMem(data, static_cast<int>(size));
     if (!rw) {
-      std::fprintf(stderr, "TextureManager: SDL_RWFromConstMem failed\n");
+      LOG_E("TextureManager", "SDL_RWFromConstMem failed");
       return nullptr;
     }
 
     // std::fprintf(stderr, "TextureManager: decoding %s (%u bytes)...\n",
     //              key.c_str(), size);
-    SDL_Surface *surface = IMG_Load_RW(rw, 1); // 1 = auto-close rw
+    // Try auto-detection first
+    SDL_Surface *surface = IMG_Load_RW(rw, 0); // 0 = don't close rw yet
+
+    // If auto-detection fails, try explicit formats common for our data
+    // providers
     if (!surface) {
-      std::fprintf(stderr, "TextureManager: IMG_Load_RW failed for %s: %s\n",
-                   key.c_str(), IMG_GetError());
-      return nullptr;
+      SDL_RWseek(rw, 0, RW_SEEK_SET);
+      surface = IMG_LoadTyped_RW(rw, 0, "PNG");
+    }
+    if (!surface) {
+      SDL_RWseek(rw, 0, RW_SEEK_SET);
+      surface = IMG_LoadTyped_RW(rw, 0, "JPG");
     }
 
-    // std::fprintf(stderr, "TextureManager: decoded %s surface: %dx%d\n",
-    //              key.c_str(), surface->w, surface->h);
+    // Close RWops now that we are done
+    SDL_RWclose(rw);
+
+    if (!surface) {
+      LOG_E("TextureManager", "IMG_Load_RW/Typed failed for {}: {}", key,
+            IMG_GetError());
+      return nullptr;
+    }
 
     // Hardware Limit Check: Downscale if surface exceeds GPU's max texture size
     SDL_RendererInfo info;
@@ -111,11 +115,9 @@ public:
         int newW = (int)(surface->w * scale);
         int newH = (int)(surface->h * scale);
 
-        std::fprintf(stderr,
-                     "TextureManager: image exceeds max texture size (%dx%d). "
-                     "Downscaling to %dx%d...\n",
-                     info.max_texture_width, info.max_texture_height, newW,
-                     newH);
+        LOG_W("TextureManager",
+              "Image exceeds max texture size ({}x{}). Downscaling to {}x{}...",
+              info.max_texture_width, info.max_texture_height, newW, newH);
 
         finalSurface = SDL_CreateRGBSurfaceWithFormat(0, newW, newH, 32,
                                                       surface->format->format);
@@ -123,7 +125,7 @@ public:
           SDL_BlitScaled(surface, nullptr, finalSurface, nullptr);
           mustFreeFinal = true;
         } else {
-          std::fprintf(stderr, "TextureManager: downscaling failed!\n");
+          LOG_E("TextureManager", "Downscaling failed!");
           finalSurface = surface;
         }
       }
@@ -135,16 +137,19 @@ public:
     SDL_FreeSurface(surface);
 
     if (!texture) {
-      std::fprintf(
-          stderr,
-          "TextureManager: SDL_CreateTextureFromSurface failed for %s: %s\n",
-          key.c_str(), SDL_GetError());
+      LOG_E("TextureManager", "SDL_CreateTextureFromSurface failed for {}: {}",
+            key, SDL_GetError());
       return nullptr;
     }
 
-    std::fprintf(stderr,
-                 "TextureManager: successfully created texture for %s\n",
-                 key.c_str());
+    // Successfully loaded new texture, now safely replace cache
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+      SDL_DestroyTexture(it->second);
+      cache_.erase(it);
+    }
+
+    LOG_D("TextureManager", "Successfully created texture for {}", key);
     cache_[key] = texture;
     return texture;
   }

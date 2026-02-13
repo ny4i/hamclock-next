@@ -62,25 +62,42 @@ public:
   }
 
   // Calculate the terminator (day/night boundary) as a polyline.
-  static std::vector<TerminatorPoint>
-  calculateTerminator(double sunLat, double sunLon, int numPoints = 361) {
-    double sLat = sunLat;
-    if (std::fabs(sLat) < 0.01)
-      sLat = (sLat >= 0) ? 0.01 : -0.01;
-    double tanSunLat = std::tan(sLat * kDeg2Rad);
+  // sunAlt is the altitude of the sun center [degrees]. 0 is horizon.
+  // -12 is typical grayline end.
+  static std::vector<TerminatorPoint> calculateTerminator(double sunLat,
+                                                          double sunLon,
+                                                          double sunAlt = 0.0,
+                                                          int numPoints = 361) {
+    double sLatRad = sunLat * kDeg2Rad;
+    double sAltRad = sunAlt * kDeg2Rad;
+    double sinSAlt = std::sin(sAltRad);
+    double sinSLat = std::sin(sLatRad);
+    double cosSLat = std::cos(sLatRad);
 
     std::vector<TerminatorPoint> points;
     points.reserve(numPoints);
 
     for (int i = 0; i < numPoints; ++i) {
       double lon = -180.0 + 360.0 * i / (numPoints - 1);
-      double dlon = lon - sunLon;
-      while (dlon > 180.0)
-        dlon -= 360.0;
-      while (dlon < -180.0)
-        dlon += 360.0;
+      double dlonRad = (lon - sunLon) * kDeg2Rad;
+      double cosDLon = std::cos(dlonRad);
 
-      double lat = std::atan(-std::cos(dlon * kDeg2Rad) / tanSunLat) * kRad2Deg;
+      // Solve for lat (phi): sin(H) = sin(phi)sin(delta) +
+      // cos(phi)cos(delta)cos(L) sin(H) = A*sin(phi) + B*cos(phi) where
+      // A=sin(delta), B=cos(delta)*cos(L) R*sin(phi + alpha) = sin(H) where R =
+      // sqrt(A*A + B*B), alpha = atan2(B, A)
+      double A = sinSLat;
+      double B = cosSLat * cosDLon;
+      double R = std::sqrt(A * A + B * B);
+      double alpha = std::atan2(B, A);
+
+      double lat;
+      if (std::abs(sinSAlt) > R) {
+        // No solution? Polar day/night.
+        lat = (sinSAlt > 0) ? 90.0 : -90.0;
+      } else {
+        lat = (std::asin(sinSAlt / R) - alpha) * kRad2Deg;
+      }
       points.push_back({lat, lon});
     }
 

@@ -15,9 +15,12 @@ HamClock-Next is a modern, SDL2-based reconstruction of the classic HamClock. It
 - **Global Map**: Interactive map with day/night terminator, great circle paths, and real-time overlays.
 - **Live Spots**: Real-time band activity visualization using PSK Reporter data, with map plotting for selected bands.
 - **Satellite Tracking**: Comprehensive satellite tracking with a high-fidelity polar plot, rise/set predictions, and map footprints.
+- **Space Weather**: Integrated Space Weather data visualization including:
+  - **Aurora Graph**: 24-hour history graph showing Aurora percentage trends
+  - **DRAP Panel**: D-Region Absorption Prediction with color-coded severity indicators
+  - Solar flux, sunspot numbers, K-index, and more
 - **Smart Setup**: Easy configuration of callsign and location via Maidenhead grid squares or direct map interaction (Shift-Click to set DE).
 - **RSS News Banner**: Smoothly scrolling news ticker aggregating multiple amateur radio news feeds.
-- **Solar Weather**: Integrated Space Weather data visualization.
 
 ## 🛠️ Requirements & Dependencies
 
@@ -28,20 +31,24 @@ To compile HamClock-Next, you will need the following libraries and tools instal
 - **SDL2_ttf**: SDL2 TrueType Font library
 - **SDL2_image**: SDL2 Image loading library
 - **libcurl**: Client URL library (for data fetching)
+- **SQLite3**: Embedded database for persistent storage
 - **Threads**: POSIX threads (built-in on most Linux systems)
 
 ### Tools
 - **CMake**: Version 3.18 or higher (compatible with RPi OS Bookworm)
 - **C++20 Compiler**: e.g., GCC 12.2 (Pi OS 12) or newer
 - **Make/Ninja**: Build automation tools
+- **pkg-config**: Package configuration tool (for finding SDL2 extensions)
 
-*Note: `nlohmann_json` and `libpredict` are automatically fetched and built via CMake during the first compilation.*
+*Note: `nlohmann_json`, `libpredict`, `cpp-httplib`, and `spdlog` are automatically fetched and built via CMake during the first compilation.*
 
 ## 🏗️ Build Instructions
 
 1. **Install dependencies** (Example for Ubuntu/Debian):
    ```bash
-   sudo apt-get install cmake build-essential libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev libcurl4-openssl-dev
+   sudo apt-get install cmake build-essential pkg-config \
+     libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
+     libcurl4-openssl-dev libsqlite3-dev
    ```
 
 2. **Configure and Build**:
@@ -56,6 +63,52 @@ To compile HamClock-Next, you will need the following libraries and tools instal
    ./hamclock-next
    ```
    *Optional: Use `-f` or `--fullscreen` to force start in fullscreen mode.*
+
+### 🔧 Building on Raspberry Pi
+
+HamClock-Next builds natively on all Raspberry Pi models. For best results on memory-constrained devices:
+
+```bash
+# Install dependencies (Raspberry Pi OS / Raspbian)
+sudo apt-get update
+sudo apt-get install cmake build-essential pkg-config \
+  libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
+  libcurl4-openssl-dev libsqlite3-dev
+
+# Clone the repository
+git clone https://github.com/USER/hamclock-next.git
+cd hamclock-next
+
+# Build with single thread (safe for 1GB RAM)
+mkdir build
+cd build
+cmake ..
+cmake --build . -j1
+```
+
+**Build times:**
+- **Pi 3B (1GB)**: ~20-30 minutes (first build)
+- **Pi 4 (4GB)**: ~10-15 minutes
+- **Pi 5 (8GB)**: ~5-8 minutes
+
+**Speed up rebuilds with ccache:**
+```bash
+sudo apt-get install ccache
+cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      ..
+cmake --build . -j1
+```
+With ccache, incremental builds take only **30-60 seconds**!
+
+For detailed optimization strategies and troubleshooting, see:
+- **[RPI_BUILD_SUCCESS.md](RPI_BUILD_SUCCESS.md)** - Raspberry Pi build guide
+- **[BUILD_OPTIMIZATION.md](BUILD_OPTIMIZATION.md)** - Memory optimization strategies
+- **[SDL2_COMPATIBILITY.md](SDL2_COMPATIBILITY.md)** - SDL2 version compatibility
+- **[DEBUG_API.md](DEBUG_API.md)** - Web server performance optimization
+
+**Note**: The web server live view is optimized for headless operation (1 FPS refresh) to reduce CPU usage (~50-60% vs ~100%). See DEBUG_API.md for customization options.
+
 
 ## 🛠️ Raspberry Pi & Console Mode (No X11)
 

@@ -162,3 +162,10 @@ SDL_Rect PaneContainer::getActionRect(const std::string &action) const {
 
   return {0, 0, 0, 0};
 }
+
+nlohmann::json PaneContainer::getDebugData() const {
+  if (activeWidget_) {
+    return activeWidget_->getDebugData();
+  }
+  return {};
+}

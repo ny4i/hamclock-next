@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/LiveSpotData.h"
+#include "../services/LiveSpotProvider.h"
 #include "FontManager.h"
 #include "Widget.h"
 
@@ -10,6 +11,7 @@
 class LiveSpotPanel : public Widget {
 public:
   LiveSpotPanel(int x, int y, int w, int h, FontManager &fontMgr,
+                LiveSpotProvider &provider,
                 std::shared_ptr<LiveSpotDataStore> store);
   ~LiveSpotPanel() override { destroyCache(); }
 
@@ -22,12 +24,14 @@ private:
   void destroyCache();
 
   FontManager &fontMgr_;
+  LiveSpotProvider &provider_;
   std::shared_ptr<LiveSpotDataStore> store_;
 
   // Snapshot of last-rendered data (to detect changes)
   int lastCounts_[kNumBands] = {};
   bool lastSelected_[kNumBands] = {};
   bool dataValid_ = false;
+  uint32_t lastFetch_ = 0;
 
   // Cached textures
   SDL_Texture *titleTex_ = nullptr;

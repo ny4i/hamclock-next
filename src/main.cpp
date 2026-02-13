@@ -1,33 +1,45 @@
+#include "core/AuroraHistoryStore.h"
+#include "core/CitiesManager.h"
 #include "core/ConfigManager.h"
 #include "core/DXClusterData.h"
+#include "core/DatabaseManager.h"
 #include "core/HamClockState.h"
 #include "core/LiveSpotData.h"
+#include "core/PrefixManager.h"
 #include "core/RSSData.h"
 #include "core/SatelliteManager.h"
 #include "core/SolarData.h"
+#ifdef ENABLE_DEBUG_API
 #include "core/UIRegistry.h"
+#endif
 #include "core/WidgetType.h"
+
 #include "network/NetworkManager.h"
 #include "network/WebServer.h"
 #include "services/ADIFProvider.h"
 #include "services/ActivityProvider.h"
 #include "services/AuroraProvider.h"
 #include "services/BandConditionsProvider.h"
+#include "services/CallbookProvider.h"
 #include "services/ContestProvider.h"
 #include "services/DRAPProvider.h"
 #include "services/DXClusterProvider.h"
+#include "services/DstProvider.h"
 #include "services/HistoryProvider.h"
 #include "services/LiveSpotProvider.h"
 #include "services/MoonProvider.h"
 #include "services/NOAAProvider.h"
 #include "services/RSSProvider.h"
 #include "services/SDOProvider.h"
+#include "services/SantaProvider.h"
 #include "services/WeatherProvider.h"
 #include "ui/ADIFPanel.h"
 #include "ui/ActivityPanels.h"
+#include "ui/AuroraGraphPanel.h"
 #include "ui/AuroraPanel.h"
 #include "ui/BandConditionsPanel.h"
 #include "ui/BeaconPanel.h"
+#include "ui/CallbookPanel.h"
 #include "ui/ClockAuxPanel.h"
 #include "ui/ContestPanel.h"
 #include "ui/CountdownPanel.h"
@@ -36,6 +48,8 @@
 #include "ui/DXClusterSetup.h"
 #include "ui/DXSatPane.h"
 #include "ui/DebugOverlay.h"
+#include "ui/DstPanel.h"
+#include "ui/EMEToolPanel.h"
 #include "ui/EmbeddedFont.h"
 #include "ui/FontCatalog.h"
 #include "ui/FontManager.h"
@@ -50,14 +64,17 @@
 #include "ui/PlaceholderWidget.h"
 #include "ui/RSSBanner.h"
 #include "ui/SDOPanel.h"
+#include "ui/SantaPanel.h"
 #include "ui/SetupScreen.h"
 #include "ui/SpaceWeatherPanel.h"
 #include "ui/TextureManager.h"
 #include "ui/TimePanel.h"
+#include "ui/WatchlistPanel.h"
 #include "ui/WeatherPanel.h"
 #include "ui/WidgetSelector.h"
 #include "ui/icon_png.h"
 
+#include "core/Logger.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
@@ -76,12 +93,23 @@ static constexpr int INITIAL_WIDTH = 800;
 static constexpr int INITIAL_HEIGHT = 480;
 static constexpr int LOGICAL_WIDTH = 800;
 static constexpr int LOGICAL_HEIGHT = 480;
-static constexpr int FRAME_DELAY_MS = 10;
+static constexpr int FRAME_DELAY_MS =
+    33; // ~30 FPS is plenty and saves CPU on Pi
 static constexpr bool FIDELITY_MODE = true;
 
 static constexpr int FONT_SIZE = 24;
 
 int main(int argc, char *argv[]) {
+  // --- Load config via ConfigManager ---
+  ConfigManager cfgMgr;
+  cfgMgr.init(); // Resolve paths for logging and config
+
+  Log::init(cfgMgr.configDir().string());
+  if (!DatabaseManager::instance().init(cfgMgr.configDir() / "hamclock.db")) {
+    LOG_E("Main", "Failed to initialize database");
+  }
+  LOG_INFO("Starting HamClock-Next v{}...", HAMCLOCK_VERSION);
+
   bool forceFullscreen = false;
   bool forceSoftware = false;
   for (int i = 1; i < argc; ++i) {
@@ -101,13 +129,11 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // --- Load config via ConfigManager ---
-  ConfigManager cfgMgr;
   AppConfig appCfg;
   enum class SetupMode { None, Main, DXCluster };
   SetupMode activeSetup = SetupMode::None;
 
-  if (!cfgMgr.init()) {
+  if (cfgMgr.configPath().empty()) {
     std::fprintf(stderr, "Warning: could not resolve config path\n");
     activeSetup = SetupMode::Main;
   } else if (!cfgMgr.load(appCfg)) {
@@ -129,25 +155,31 @@ int main(int argc, char *argv[]) {
     std::fprintf(stderr, "Requested SDL_VIDEODRIVER via env: %s\n", envDriver);
   }
 
-  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-    std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
+    LOG_ERROR("SDL_Init failed: {}", SDL_GetError());
     if (numDrivers == 0) {
-      std::fprintf(stderr, "Error: No video drivers compiled into SDL2.\n");
+      LOG_ERROR("Error: No video drivers compiled into SDL2.");
     } else {
       bool hasDRI = (access("/dev/dri/card0", F_OK) == 0);
       if (!hasDRI) {
-        std::fprintf(stderr, "Error: /dev/dri/card0 not found. KMSDRM requires "
-                             "the modern DRM/KMS driver.\n");
-        std::fprintf(stderr, "Hint: Enable 'dtoverlay=vc4-kms-v3d' in "
-                             "/boot/config.txt and reboot.\n");
+        LOG_ERROR("Error: /dev/dri/card0 not found. KMSDRM requires the modern "
+                  "DRM/KMS driver.");
+        LOG_ERROR("Hint: Enable 'dtoverlay=vc4-kms-v3d' in /boot/config.txt "
+                  "and reboot.");
       } else {
-        std::fprintf(stderr, "Hint: If running from console, ensure you have "
-                             "permission to /dev/dri/card0\n");
-        std::fprintf(stderr,
-                     "      Try: sudo usermod -aG video,render $USER\n");
+        LOG_ERROR("Hint: If running from console, ensure you have permission "
+                  "to /dev/dri/card0");
+        LOG_ERROR("      Try: sudo usermod -aG video,render $USER");
       }
     }
     return EXIT_FAILURE;
+  }
+
+  // Init SDL_image
+  int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+  if (!(IMG_Init(imgFlags) & imgFlags)) {
+    LOG_ERROR("IMG_Init failed: {}", IMG_GetError());
+    // Continue anyway, basic BMP support is built-in
   }
 
   const char *activeDriver = SDL_GetCurrentVideoDriver();
@@ -318,6 +350,42 @@ int main(int argc, char *argv[]) {
 
   curl_global_init(CURL_GLOBAL_DEFAULT);
 
+  // --- Data layer persistent globals ---
+  NetworkManager netManager(cfgMgr.configDir() / "cache");
+  PrefixManager prefixMgr;
+  prefixMgr.init();
+  CitiesManager::getInstance().init();
+
+  auto solarStore = std::make_shared<SolarDataStore>();
+  auto watchlistStore = std::make_shared<WatchlistStore>();
+  auto rssStore = std::make_shared<RSSDataStore>();
+  auto watchlistHitStore = std::make_shared<WatchlistHitStore>();
+  auto spotStore = std::make_shared<LiveSpotDataStore>();
+  auto activityStore = std::make_shared<ActivityDataStore>();
+  auto dxcStore = std::make_shared<DXClusterDataStore>();
+  auto bandStore = std::make_shared<BandConditionsStore>();
+  auto contestStore = std::make_shared<ContestStore>();
+  auto moonStore = std::make_shared<MoonStore>();
+  auto historyStore = std::make_shared<HistoryStore>();
+  auto deWeatherStore = std::make_shared<WeatherStore>();
+  auto dxWeatherStore = std::make_shared<WeatherStore>();
+  auto callbookStore = std::make_shared<CallbookStore>();
+  auto dstStore = std::make_shared<DstStore>();
+  auto adifStore = std::make_shared<ADIFStore>();
+  auto santaStore = std::make_shared<SantaStore>();
+  auto state = std::make_shared<HamClockState>();
+
+  // Pre-populate watchlist with defaults if empty
+  if (watchlistStore->getAll().empty()) {
+    watchlistStore->add("K1ABC");
+    watchlistStore->add("W1AW");
+  }
+
+  // --- Web Server (Persistent) ---
+  WebServer webServer(renderer, appCfg, *state, cfgMgr, watchlistStore,
+                      solarStore, 8080);
+  webServer.start();
+
   bool appRunning = true;
   while (appRunning) {
     // --- Run setup screen if needed (first run or gear icon click) ---
@@ -450,15 +518,10 @@ int main(int argc, char *argv[]) {
       activeSetup = SetupMode::None;
     }
 
-    // --- Init global state from config ---
-    auto state = std::make_shared<HamClockState>();
+    // --- Update global state from config (in case changed in setup) ---
     state->deCallsign = appCfg.callsign;
     state->deGrid = appCfg.grid;
     state->deLocation = {appCfg.lat, appCfg.lon};
-
-    // --- Web Server (Mirror) ---
-    WebServer webServer(renderer, appCfg, *state, 8080);
-    webServer.start();
 
     // Scope block: all managers/widgets must be destroyed before re-entering
     // setup.
@@ -485,65 +548,64 @@ int main(int argc, char *argv[]) {
 
       DebugOverlay debugOverlay(fontMgr);
 
-      // --- Data layer ---
-      auto solarStore = std::make_shared<SolarDataStore>();
-      NetworkManager netManager(cfgMgr.configDir() / "cache");
-      NOAAProvider noaaProvider(netManager, solarStore);
+      // --- Data providers ---
+      auto auroraHistoryStore = std::make_shared<AuroraHistoryStore>();
+      NOAAProvider noaaProvider(netManager, solarStore, auroraHistoryStore,
+                                state.get());
       noaaProvider.fetch();
 
-      auto rssStore = std::make_shared<RSSDataStore>();
       RSSProvider rssProvider(netManager, rssStore);
       rssProvider.fetch();
 
-      auto spotStore = std::make_shared<LiveSpotDataStore>();
-      LiveSpotProvider spotProvider(netManager, spotStore, appCfg.callsign,
-                                    appCfg.grid);
+      LiveSpotProvider spotProvider(netManager, spotStore, appCfg, state.get());
       spotProvider.fetch();
 
       SatelliteManager satMgr(netManager);
       satMgr.fetch();
 
-      auto activityStore = std::make_shared<ActivityDataStore>();
       ActivityProvider activityProvider(netManager, activityStore);
       activityProvider.fetch();
 
-      auto dxcStore = std::make_shared<DXClusterDataStore>();
-      DXClusterProvider dxcProvider(dxcStore);
+      DXClusterProvider dxcProvider(dxcStore, prefixMgr, watchlistStore,
+                                    watchlistHitStore, state.get());
       dxcProvider.start(appCfg);
 
-      auto bandStore = std::make_shared<BandConditionsStore>();
       BandConditionsProvider bandProvider(solarStore, bandStore);
       bandProvider.update();
 
-      auto contestStore = std::make_shared<ContestStore>();
       ContestProvider contestProvider(netManager, contestStore);
       contestProvider.fetch();
 
-      auto moonStore = std::make_shared<MoonStore>();
-      MoonProvider moonProvider(moonStore);
+      MoonProvider moonProvider(netManager, moonStore);
       moonProvider.update(appCfg.lat, appCfg.lon);
 
-      auto historyStore = std::make_shared<HistoryStore>();
       HistoryProvider historyProvider(netManager, historyStore);
       historyProvider.fetchFlux();
       historyProvider.fetchSSN();
       historyProvider.fetchKp();
 
-      auto deWeatherStore = std::make_shared<WeatherStore>();
       WeatherProvider deWeatherProvider(netManager, deWeatherStore);
       deWeatherProvider.fetch(state->deLocation.lat, state->deLocation.lon);
 
-      auto dxWeatherStore = std::make_shared<WeatherStore>();
       WeatherProvider dxWeatherProvider(netManager, dxWeatherStore);
       dxWeatherProvider.fetch(state->dxLocation.lat, state->dxLocation.lon);
 
       SDOProvider sdoProvider(netManager);
       DRAPProvider drapProvider(netManager);
-      AuroraProvider auroraProvider(netManager);
+      auto auroraProvider = std::make_shared<AuroraProvider>(netManager);
 
-      auto adifStore = std::make_shared<ADIFStore>();
+      auto callbookProvider =
+          std::make_shared<CallbookProvider>(netManager, callbookStore);
+      callbookProvider->lookup("K1ABC");
+
+      DstProvider dstProvider(netManager, dstStore);
+      dstProvider.fetch();
+
       ADIFProvider adifProvider(adifStore);
       adifProvider.fetch(cfgMgr.configDir() / "logs.adif");
+
+      SantaProvider santaProvider(santaStore);
+      santaProvider.update();
 
       // --- Top Bar widgets ---
       SDL_Color cyan = {0, 200, 255, 255};
@@ -572,8 +634,8 @@ int main(int argc, char *argv[]) {
               std::make_unique<DXClusterPanel>(0, 0, 0, 0, fontMgr, dxcStore);
           break;
         case WidgetType::LIVE_SPOTS:
-          widgetPool[type] =
-              std::make_unique<LiveSpotPanel>(0, 0, 0, 0, fontMgr, spotStore);
+          widgetPool[type] = std::make_unique<LiveSpotPanel>(
+              0, 0, 0, 0, fontMgr, spotProvider, spotStore);
           break;
         case WidgetType::BAND_CONDITIONS:
           widgetPool[type] = std::make_unique<BandConditionsPanel>(
@@ -583,32 +645,56 @@ int main(int argc, char *argv[]) {
           widgetPool[type] =
               std::make_unique<ContestPanel>(0, 0, 0, 0, fontMgr, contestStore);
           break;
-        case WidgetType::ON_THE_AIR:
+        case WidgetType::CALLBOOK:
+          widgetPool[type] = std::make_unique<CallbookPanel>(
+              0, 0, 0, 0, fontMgr, callbookStore);
+          break;
+        case WidgetType::DST_INDEX:
           widgetPool[type] =
-              std::make_unique<ONTAPanel>(0, 0, 0, 0, fontMgr, activityStore);
+              std::make_unique<DstPanel>(0, 0, 0, 0, fontMgr, dstStore);
+          break;
+        case WidgetType::WATCHLIST:
+          widgetPool[type] = std::make_unique<WatchlistPanel>(
+              0, 0, 0, 0, fontMgr, watchlistStore, watchlistHitStore);
+          break;
+        case WidgetType::EME_TOOL:
+          widgetPool[type] =
+              std::make_unique<EMEToolPanel>(0, 0, 0, 0, fontMgr, moonStore);
+          break;
+        case WidgetType::SANTA_TRACKER:
+          widgetPool[type] =
+              std::make_unique<SantaPanel>(0, 0, 0, 0, fontMgr, santaStore);
+          break;
+        case WidgetType::ON_THE_AIR:
+          widgetPool[type] = std::make_unique<ONTAPanel>(
+              0, 0, 0, 0, fontMgr, activityProvider, activityStore);
           break;
         case WidgetType::DX_PEDITIONS:
-          widgetPool[type] =
-              std::make_unique<DXPedPanel>(0, 0, 0, 0, fontMgr, activityStore);
+          widgetPool[type] = std::make_unique<DXPedPanel>(
+              0, 0, 0, 0, fontMgr, activityProvider, activityStore);
           break;
         case WidgetType::GIMBAL:
           widgetPool[type] = std::make_unique<GimbalPanel>(0, 0, 0, 0, fontMgr);
           break;
         case WidgetType::MOON:
-          widgetPool[type] =
-              std::make_unique<MoonPanel>(0, 0, 0, 0, fontMgr, moonStore);
+          widgetPool[type] = std::make_unique<MoonPanel>(
+              0, 0, 0, 0, fontMgr, texMgr, netManager, moonStore);
           break;
         case WidgetType::CLOCK_AUX:
           widgetPool[type] =
               std::make_unique<ClockAuxPanel>(0, 0, 0, 0, fontMgr);
           break;
+        case WidgetType::HISTORY_FLUX:
+          widgetPool[type] = std::make_unique<HistoryPanel>(
+              0, 0, 0, 0, fontMgr, texMgr, historyStore, "flux");
+          break;
         case WidgetType::HISTORY_SSN:
           widgetPool[type] = std::make_unique<HistoryPanel>(
-              0, 0, 0, 0, fontMgr, historyStore, "ssn");
+              0, 0, 0, 0, fontMgr, texMgr, historyStore, "ssn");
           break;
         case WidgetType::HISTORY_KP:
-          widgetPool[type] = std::make_unique<HistoryPanel>(0, 0, 0, 0, fontMgr,
-                                                            historyStore, "kp");
+          widgetPool[type] = std::make_unique<HistoryPanel>(
+              0, 0, 0, 0, fontMgr, texMgr, historyStore, "kp");
           break;
         case WidgetType::DRAP:
           widgetPool[type] = std::make_unique<DRAPPanel>(0, 0, 0, 0, fontMgr,
@@ -616,7 +702,11 @@ int main(int argc, char *argv[]) {
           break;
         case WidgetType::AURORA:
           widgetPool[type] = std::make_unique<AuroraPanel>(
-              0, 0, 0, 0, fontMgr, texMgr, auroraProvider);
+              0, 0, 0, 0, fontMgr, texMgr, *auroraProvider);
+          break;
+        case WidgetType::AURORA_GRAPH:
+          widgetPool[type] = std::make_unique<AuroraGraphPanel>(
+              0, 0, 0, 0, fontMgr, auroraHistoryStore);
           break;
         case WidgetType::ADIF:
           widgetPool[type] =
@@ -659,8 +749,8 @@ int main(int argc, char *argv[]) {
           WidgetType::NCDXF,        WidgetType::SDO,
           WidgetType::HISTORY_FLUX, WidgetType::HISTORY_KP,
           WidgetType::HISTORY_SSN,  WidgetType::DRAP,
-          WidgetType::AURORA,       WidgetType::ADIF,
-          WidgetType::COUNTDOWN};
+          WidgetType::AURORA,       WidgetType::AURORA_GRAPH,
+          WidgetType::ADIF,         WidgetType::COUNTDOWN};
       for (auto t : allTypes)
         addToPool(t);
 
@@ -716,8 +806,9 @@ int main(int argc, char *argv[]) {
       }
 
       // --- Side Panel widgets (2 panes) ---
-      LocalPanel localPanel(0, 0, 0, 0, fontMgr, state);
-      DXSatPane dxSatPane(0, 0, 0, 0, fontMgr, texMgr, state, satMgr);
+      LocalPanel localPanel(0, 0, 0, 0, fontMgr, state, deWeatherStore);
+      DXSatPane dxSatPane(0, 0, 0, 0, fontMgr, texMgr, state, satMgr,
+                          dxWeatherStore);
       dxSatPane.setObserver(appCfg.lat, appCfg.lon);
       dxSatPane.restoreState(appCfg.panelMode, appCfg.selectedSatellite);
       dxSatPane.setOnModeChanged(
@@ -729,24 +820,35 @@ int main(int argc, char *argv[]) {
           });
 
       // --- Main Stage ---
-      MapWidget mapArea(0, 0, 0, 0, texMgr, netManager, state);
+      MapWidget mapArea(0, 0, 0, 0, texMgr, fontMgr, netManager, state, appCfg);
       mapArea.setSpotStore(spotStore);
       mapArea.setDXClusterStore(dxcStore);
+      mapArea.setAuroraStore(auroraHistoryStore);
       RSSBanner rssBanner(139, 412, 660, 68, fontMgr, rssStore);
 
       // --- Apply Theme ---
       for (auto const &[type, widget] : widgetPool) {
-        if (widget)
+        if (widget) {
           widget->setTheme(appCfg.theme);
+          widget->setMetric(appCfg.useMetric);
+        }
       }
       timePanel.setTheme(appCfg.theme);
+      timePanel.setMetric(appCfg.useMetric);
       localPanel.setTheme(appCfg.theme);
+      localPanel.setMetric(appCfg.useMetric);
       dxSatPane.setTheme(appCfg.theme);
+      dxSatPane.setMetric(appCfg.useMetric);
       mapArea.setTheme(appCfg.theme);
+      mapArea.setMetric(appCfg.useMetric);
       rssBanner.setTheme(appCfg.theme);
+      rssBanner.setMetric(appCfg.useMetric);
       widgetSelector.setTheme(appCfg.theme);
-      for (auto &p : panes)
+      widgetSelector.setMetric(appCfg.useMetric);
+      for (auto &p : panes) {
         p->setTheme(appCfg.theme);
+        p->setMetric(appCfg.useMetric);
+      }
 
       // --- Layout ---
       LayoutManager layout;
@@ -861,6 +963,8 @@ int main(int argc, char *argv[]) {
       Uint32 lastFetchMs = SDL_GetTicks();
       Uint32 lastResizeMs = 0; // debounce timer for font re-rasterization
       bool running = true;
+      Uint32 lastFpsUpdate = SDL_GetTicks();
+      int frames = 0;
       while (running) {
         Uint32 now = SDL_GetTicks();
 
@@ -1002,6 +1106,33 @@ int main(int argc, char *argv[]) {
             }
             break;
           }
+          case SDL_MOUSEMOTION: {
+            int mx = event.motion.x, my = event.motion.y;
+            if (FIDELITY_MODE) {
+              float pixX =
+                  event.motion.x * static_cast<float>(globalDrawW) / globalWinW;
+              float pixY =
+                  event.motion.y * static_cast<float>(globalDrawH) / globalWinH;
+              mx = static_cast<int>(pixX / layScale);
+              my = static_cast<int>(pixY / layScale);
+            }
+            // Dispatch to modal if active
+            Widget *activeModal = nullptr;
+            for (auto *w : eventWidgets) {
+              if (w->isModalActive()) {
+                activeModal = w;
+                break;
+              }
+            }
+            if (activeModal) {
+              activeModal->onMouseMove(mx, my);
+            } else {
+              for (auto *w : eventWidgets) {
+                w->onMouseMove(mx, my);
+              }
+            }
+            break;
+          }
           case SDL_MOUSEBUTTONUP:
             if (event.button.button == SDL_BUTTON_LEFT) {
               int mx = event.button.x, my = event.button.y;
@@ -1098,11 +1229,13 @@ int main(int argc, char *argv[]) {
         for (auto *w : widgets)
           w->update();
 
+#ifdef ENABLE_DEBUG_API
         // Update Semantic Debug Registry
         {
           auto &reg = UIRegistry::getInstance();
           reg.setScale(layScale, layLogicalOffX, layLogicalOffY);
-          reg.clear();
+
+          std::map<std::string, WidgetInfo> newSnapshot;
           for (auto *w : eventWidgets) {
             WidgetInfo info;
             info.name = w->getName();
@@ -1110,12 +1243,25 @@ int main(int argc, char *argv[]) {
             for (const auto &action : w->getActions()) {
               info.actions.push_back({action, w->getActionRect(action)});
             }
-            reg.updateWidget(info.name, info);
+            info.data = w->getDebugData();
+            newSnapshot[info.name] = info;
           }
+          reg.replaceAll(newSnapshot);
         }
+#endif
 
         renderFrame();
         webServer.updateFrame();
+
+        // Update FPS telemetry
+        frames++;
+        Uint32 nowMs = SDL_GetTicks();
+        if (nowMs - lastFpsUpdate >= 1000) {
+          state->fps = frames * 1000.0f / (nowMs - lastFpsUpdate);
+          frames = 0;
+          lastFpsUpdate = nowMs;
+        }
+
         SDL_Delay(FRAME_DELAY_MS);
       }
     } // widgets/managers destroyed here

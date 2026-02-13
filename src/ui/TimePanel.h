@@ -27,6 +27,7 @@ public:
   std::string getName() const override { return "TimePanel"; }
   std::vector<std::string> getActions() const override;
   SDL_Rect getActionRect(const std::string &action) const override;
+  nlohmann::json getDebugData() const override;
 
   bool isEditing() const { return editing_; }
 

@@ -17,7 +17,7 @@
 
 namespace {
 
-static constexpr const char *kVersion = "V0.1";
+static constexpr const char *kVersion = "V" HAMCLOCK_VERSION;
 static constexpr Uint32 kInfoRotateMs = 3000;
 
 std::string getSystemUptime() {
@@ -593,4 +593,18 @@ SDL_Rect TimePanel::getActionRect(const std::string &action) const {
   }
 
   return {0, 0, 0, 0};
+}
+
+nlohmann::json TimePanel::getDebugData() const {
+  nlohmann::json j = nlohmann::json::object();
+  j["callsign"] = callsign_;
+  j["time_utc"] = currentHM_ + currentSec_;
+  j["date"] = currentDate_;
+  j["uptime"] = currentUptime_;
+  j["editing"] = editing_;
+  if (editing_) {
+    j["editText"] = editText_;
+    j["cursorPos"] = cursorPos_;
+  }
+  return j;
 }

@@ -20,7 +20,7 @@ SpaceWeatherPanel::SpaceWeatherPanel(int x, int y, int w, int h,
   items_[7].label = "Bt";
   items_[8].label = "DST";
   items_[9].label = "Aurora";
-  items_[10].label = "-";
+  items_[10].label = "DRAP";
   items_[11].label = "-";
 }
 
@@ -79,7 +79,9 @@ void SpaceWeatherPanel::update() {
   items_[3].value = buf;
   items_[3].valueColor = colorForK(data.k_index);
 
-  std::snprintf(buf, sizeof(buf), "%.0f", data.solar_wind_speed);
+  float windSpd =
+      useMetric_ ? data.solar_wind_speed : (data.solar_wind_speed * 0.621371f);
+  std::snprintf(buf, sizeof(buf), "%.0f", windSpd);
   items_[4].value = buf;
   items_[4].valueColor = {255, 128, 0, 255};
 
@@ -106,7 +108,10 @@ void SpaceWeatherPanel::update() {
   items_[9].valueColor = (data.aurora > 50) ? SDL_Color{255, 128, 0, 255}
                                             : SDL_Color{0, 255, 255, 255};
 
-  items_[10].value = "-";
+  std::snprintf(buf, sizeof(buf), "%d", data.drap);
+  items_[10].value = buf;
+  items_[10].valueColor = {0, 255, 255, 255};
+
   items_[11].value = "-";
 }
 
@@ -227,4 +232,36 @@ void SpaceWeatherPanel::onResize(int x, int y, int w, int h) {
   labelFontSize_ = cat->ptSize(FontStyle::Fast);
   valueFontSize_ = cat->ptSize(FontStyle::SmallBold);
   destroyCache();
+}
+
+bool SpaceWeatherPanel::onMouseUp(int mx, int my, Uint16 mod) {
+  (void)mx;
+  (void)my;
+  (void)mod;
+  currentPage_ = (currentPage_ + 1) % 3;
+  lastPageUpdate_ = SDL_GetTicks();
+  destroyCache();
+  return true;
+}
+
+std::vector<std::string> SpaceWeatherPanel::getActions() const {
+  return {"cycle_page"};
+}
+
+SDL_Rect SpaceWeatherPanel::getActionRect(const std::string &action) const {
+  if (action == "cycle_page") {
+    // Return the whole widget to accept broad clicks
+    return {x_, y_, width_, height_};
+  }
+  return {0, 0, 0, 0};
+}
+
+nlohmann::json SpaceWeatherPanel::getDebugData() const {
+  nlohmann::json j = nlohmann::json::object();
+  for (const auto &item : items_) {
+    if (item.label != "-" && !item.label.empty()) {
+      j[item.label] = item.value;
+    }
+  }
+  return j;
 }

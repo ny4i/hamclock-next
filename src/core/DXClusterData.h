@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+#include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -35,51 +37,21 @@ struct DXClusterData {
 
 class DXClusterDataStore {
 public:
-  DXClusterData get() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return data_;
-  }
+  DXClusterDataStore();
+  ~DXClusterDataStore();
 
-  void set(const DXClusterData &data) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    data_ = data;
-  }
+  DXClusterData get() const;
+  void set(const DXClusterData &data);
+  void addSpot(const DXClusterSpot &spot);
+  void setConnected(bool connected, const std::string &status = "");
+  void clear();
 
-  void addSpot(const DXClusterSpot &spot) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    // Add unique spot (same call and band/freq?)
-    // Similar to original addDXClusterSpot logic
-
-    // For now, just append and prune old ones (e.g. older than 60 mins)
-    data_.spots.push_back(spot);
-    pruneOldSpots();
-    data_.lastUpdate = std::chrono::system_clock::now();
-  }
-
-  void setConnected(bool connected, const std::string &status = "") {
-    std::lock_guard<std::mutex> lock(mutex_);
-    data_.connected = connected;
-    data_.statusMsg = status;
-    data_.lastUpdate = std::chrono::system_clock::now();
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    data_.spots.clear();
-    data_.lastUpdate = std::chrono::system_clock::now();
-  }
+  // Load persisted spots from DB.
+  void loadPersisted();
 
 private:
-  void pruneOldSpots() {
-    auto now = std::chrono::system_clock::now();
-    auto maxAge = std::chrono::minutes(60); // Default 60 mins
-
-    data_.spots.erase(std::remove_if(data_.spots.begin(), data_.spots.end(),
-                                     [&](const DXClusterSpot &s) {
-                                       return (now - s.spottedAt) > maxAge;
-                                     }),
-                      data_.spots.end());
-  }
+  void pruneOldSpots();
+  // We'll keep DB interaction strictly inside implementation for now.
 
   mutable std::mutex mutex_;
   DXClusterData data_;

@@ -101,13 +101,21 @@ void SatPanel::update() {
                 obs.elevation);
   lineText_[2] = buf;
 
-  // Line 3: "TLE Age X.X days"
+  // Line 3: Range (km or mi)
+  double range = obs.range;
+  if (!useMetric_)
+    range *= 0.621371;
+  const char *distUnit = useMetric_ ? "km" : "mi";
+  std::snprintf(buf, sizeof(buf), "Range: %.0f %s", range, distUnit);
+  lineText_[3] = buf;
+
+  // Line 4: "TLE Age X.X days"
   double age = predictor_->tleAgeDays();
   if (age >= 0.0) {
     std::snprintf(buf, sizeof(buf), "TLE Age %.1f days", age);
-    lineText_[3] = buf;
+    lineText_[4] = buf;
   } else {
-    lineText_[3].clear();
+    lineText_[4].clear();
   }
 
   // Build pass trajectory for polar plot
@@ -309,7 +317,8 @@ void SatPanel::onResize(int x, int y, int w, int h) {
   lineFontSize_[0] = nameFontSize_; // Sat name
   lineFontSize_[1] = infoFontSize_; // Rise in / Set in
   lineFontSize_[2] = infoFontSize_; // Az / El
-  lineFontSize_[3] = infoFontSize_; // TLE Age
+  lineFontSize_[3] = infoFontSize_; // Range
+  lineFontSize_[4] = infoFontSize_; // TLE Age
 
   destroyCache();
 }

@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <map>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@ struct WidgetInfo {
   std::string name;
   SDL_Rect rect;
   std::vector<SemanticAction> actions;
+  nlohmann::json data;
 };
 
 class UIRegistry {
@@ -27,6 +29,11 @@ public:
   void updateWidget(const std::string &id, const WidgetInfo &info) {
     std::lock_guard<std::mutex> lock(mutex_);
     widgets_[id] = info;
+  }
+
+  void replaceAll(const std::map<std::string, WidgetInfo> &newWidgets) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    widgets_ = newWidgets;
   }
 
   void clear() {

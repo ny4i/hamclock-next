@@ -21,7 +21,7 @@ private:
 
   static constexpr const char *DX_PEDS_URL =
       "https://www.ng3k.com/Misc/adxo.html";
-  static constexpr const char *POTA_API_URL = "https://api.pota.app/spot/info";
+  static constexpr const char *POTA_API_URL = "https://api.pota.app/spot";
   static constexpr const char *SOTA_API_URL =
-      "https://api2.sota.org.uk/api/spots";
+      "https://api2.sota.org.uk/api/spots/50";
 };

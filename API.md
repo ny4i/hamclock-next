@@ -44,12 +44,27 @@ Returns the current UTC time in the standard HamClock format:
 Returns current DE (Designated Entry) location information.
 - Fields: `DE_Callsign`, `DE_Grid`, `DE_Lat`, `DE_Lon`
 
+### `GET /get_dx.txt`
+Returns current DX (target) location and path information.
+- Fields: `DX_Grid`, `DX_Lat`, `DX_Lon`, `DX_Dist_km`, `DX_Bearing`
+- Returns "DX not set" if no DX location is active.
+
+### `GET /set_mappos?lat=F&lon=F[&target=S]`
+Programmatically sets the DE or DX location on the map.
+- `lat`: Latitude in degrees (-90 to 90)
+- `lon`: Longitude in degrees (-180 to 180)
+- `target`: `de` or `dx` (default: `dx`)
+- **Returns**: JSON with `target`, `lat`, `lon`, `grid`
+- **Example**: `GET /set_mappos?lat=40.7&lon=-74.0&target=dx`
+
 ---
 
 ## Debugging & Automation API
 
 ### `GET /debug/widgets`
-Returns a JSON snapshot of all currently active UI widgets and their "semantic actions". This is the primary endpoint for building automated tests or smart remote controls.
+Returns a JSON snapshot of all currently active UI widgets and their "semantic actions".
+- **Enhanced Data**: Now includes a `data` field for each widget containing high-level state (e.g., current SFI, active watchlist hits, etc.).
+- **Map Widget**: The `data` field includes DE/DX positions, sun position, satellite info, spot counts, and current tooltip text.
 
 ### `GET /debug/click?widget=W&action=A`
 Performs a semantic click on a specific widget action.
@@ -57,12 +72,27 @@ Performs a semantic click on a specific widget action.
 - `action`: The name of the action (e.g., `ToggleMode`)
 - **Example**: `GET /debug/click?widget=SolarPanel&action=Cycle`
 
+### `GET /debug/performance`
+Returns real-time performance metrics in JSON format.
+- `fps`: Current frames per second.
+- `running_since`: Application uptime in seconds.
+
+### `GET /debug/health`
+Returns a JSON map of background service statuses.
+- Shows `ok` status, `lastError`, and `lastSuccess` timestamp for services like NOAA, PSK Reporter, etc.
+
+### `GET /debug/logs`
+Returns the recent internal application log buffer (last 500 entries) in JSON format.
+
+### `GET /debug/store/set_solar?sfi=N&k=N&sn=N`
+Allows manual injection of solar weather data for testing purposes.
+
+### `GET /debug/watchlist/add?call=XY1ABC`
+programmatically adds a callsign to the monitor watchlist.
+
 ### `GET /debug/type?text=T`
 Simulates typing a full string into the application.
 - **Example**: `GET /debug/type?text=K4DRW`
-
-### `GET /debug/keypress?key=K`
-Alternative to `set_char`, optimized for lowercase key names.
 
 ---
 
@@ -70,9 +100,7 @@ Alternative to `set_char`, optimized for lowercase key names.
 
 The following endpoints are suggested for future implementation to improve remote management:
 
-- `GET /get_dx.txt`: Report current DX location and distance/bearing.
-- `POST /set_config`: Allow updating configuration via JSON payload.
-- `GET /status.json`: A unified endpoint returning SFI, SSN, current satellites, and active alerts.
 - `GET /screenshot.png`: High-quality PNG capture (lossless).
 - `POST /restart`: Software-initiated application restart.
-- `GET /log`: Retrieve recent application logs.
+- `POST /factory_reset`: Clear all settings and caches.
+

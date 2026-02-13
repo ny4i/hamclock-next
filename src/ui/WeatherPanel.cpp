@@ -60,15 +60,23 @@ void WeatherPanel::render(SDL_Renderer *renderer) {
     char lblBuf[32];
     const char *prefix = (title_.find("DE") != std::string::npos) ? "DE" : "DX";
 
-    std::snprintf(valBuf, sizeof(valBuf), "%.1f", currentData_.temp);
-    std::snprintf(lblBuf, sizeof(lblBuf), "%s Temp", prefix);
+    float temp =
+        useMetric_ ? currentData_.temp : (currentData_.temp * 1.8f + 32.0f);
+    float wind = useMetric_ ? currentData_.windSpeed
+                            : (currentData_.windSpeed * 2.237f); // m/s to mph
+    const char *tempUnit = useMetric_ ? "C" : "F";
+    const char *windUnit = useMetric_ ? "m/s" : "mph";
+
+    std::snprintf(valBuf, sizeof(valBuf), "%.1f", temp);
+    std::snprintf(lblBuf, sizeof(lblBuf), "%s %s", prefix, tempUnit);
     drawNarrowRow(valBuf, lblBuf, 0, {0, 255, 0, 255}); // Green in original
 
     std::snprintf(valBuf, sizeof(valBuf), "%d", currentData_.humidity);
     drawNarrowRow(valBuf, "Humidity", 1, {0, 255, 0, 255});
 
-    std::snprintf(valBuf, sizeof(valBuf), "%.0f", currentData_.windSpeed);
-    drawNarrowRow(valBuf, "Wind Spd", 2, {0, 255, 0, 255});
+    std::snprintf(valBuf, sizeof(valBuf), "%.0f", wind);
+    std::snprintf(lblBuf, sizeof(lblBuf), "%s", windUnit);
+    drawNarrowRow(valBuf, lblBuf, 2, {0, 255, 0, 255});
 
     drawNarrowRow(degToDir(currentData_.windDeg), "Wind Dir", 3,
                   {0, 255, 0, 255});
@@ -92,8 +100,10 @@ void WeatherPanel::render(SDL_Renderer *renderer) {
 
   // Temperature
   char buf[64];
-  // Avoid literal degree symbol to sidestep encoding issues
-  std::snprintf(buf, sizeof(buf), "%.1f C", currentData_.temp);
+  float temp =
+      useMetric_ ? currentData_.temp : (currentData_.temp * 1.8f + 32.0f);
+  const char *tempUnit = useMetric_ ? "C" : "F";
+  std::snprintf(buf, sizeof(buf), "%.1f %s", temp, tempUnit);
   fontMgr_.drawText(renderer, buf, centerX, curY + tempFontSize_ / 2,
                     themes.text, tempFontSize_, true, true);
   curY += tempFontSize_ + 10;
@@ -124,7 +134,10 @@ void WeatherPanel::render(SDL_Renderer *renderer) {
   detailY += infoFontSize_ * 2 + 8;
 
   // Wind
-  std::snprintf(buf, sizeof(buf), "%.1f m/s", currentData_.windSpeed);
+  float wind =
+      useMetric_ ? currentData_.windSpeed : (currentData_.windSpeed * 2.237f);
+  const char *windUnit = useMetric_ ? "m/s" : "mph";
+  std::snprintf(buf, sizeof(buf), "%.1f %s", wind, windUnit);
   drawDetail("WIND", buf, x_ + pad + colWidth / 2, detailY);
 
   std::snprintf(buf, sizeof(buf), "%d deg", currentData_.windDeg);

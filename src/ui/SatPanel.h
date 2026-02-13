@@ -33,7 +33,7 @@ private:
   OrbitPredictor *predictor_ = nullptr;
 
   // Text lines: name, rise/set info, az/el, TLE age
-  static constexpr int kNumLines = 4;
+  static constexpr int kNumLines = 5;
   SDL_Texture *lineTex_[kNumLines] = {};
   int lineW_[kNumLines] = {};
   int lineH_[kNumLines] = {};

@@ -23,8 +23,14 @@ enum class WidgetType {
   HISTORY_SSN,
   DRAP,
   AURORA,
+  AURORA_GRAPH,
   ADIF,
   COUNTDOWN,
+  CALLBOOK,
+  DST_INDEX,
+  WATCHLIST,
+  EME_TOOL,
+  SANTA_TRACKER,
 };
 
 inline const char *widgetTypeToString(WidgetType t) {
@@ -67,10 +73,22 @@ inline const char *widgetTypeToString(WidgetType t) {
     return "drap";
   case WidgetType::AURORA:
     return "aurora";
+  case WidgetType::AURORA_GRAPH:
+    return "aurora_graph";
   case WidgetType::ADIF:
     return "adif";
   case WidgetType::COUNTDOWN:
     return "countdown";
+  case WidgetType::CALLBOOK:
+    return "callbook";
+  case WidgetType::DST_INDEX:
+    return "dst_index";
+  case WidgetType::WATCHLIST:
+    return "watchlist";
+  case WidgetType::EME_TOOL:
+    return "eme_tool";
+  case WidgetType::SANTA_TRACKER:
+    return "santa_tracker";
   }
   return "solar";
 }
@@ -115,10 +133,22 @@ inline const char *widgetTypeDisplayName(WidgetType t) {
     return "DRAP";
   case WidgetType::AURORA:
     return "Aurora";
+  case WidgetType::AURORA_GRAPH:
+    return "Aurora Graph";
   case WidgetType::ADIF:
     return "ADIF Log";
   case WidgetType::COUNTDOWN:
     return "Countdown";
+  case WidgetType::CALLBOOK:
+    return "Callbook";
+  case WidgetType::DST_INDEX:
+    return "Dst Index";
+  case WidgetType::WATCHLIST:
+    return "Watchlist";
+  case WidgetType::EME_TOOL:
+    return "EME Tool";
+  case WidgetType::SANTA_TRACKER:
+    return "Santa Tracker";
   }
   return "Solar";
 }
@@ -163,10 +193,22 @@ inline WidgetType widgetTypeFromString(const std::string &s,
     return WidgetType::DRAP;
   if (s == "aurora")
     return WidgetType::AURORA;
+  if (s == "aurora_graph")
+    return WidgetType::AURORA_GRAPH;
   if (s == "adif")
     return WidgetType::ADIF;
   if (s == "countdown")
     return WidgetType::COUNTDOWN;
+  if (s == "callbook")
+    return WidgetType::CALLBOOK;
+  if (s == "dst_index")
+    return WidgetType::DST_INDEX;
+  if (s == "watchlist")
+    return WidgetType::WATCHLIST;
+  if (s == "eme_tool")
+    return WidgetType::EME_TOOL;
+  if (s == "santa_tracker")
+    return WidgetType::SANTA_TRACKER;
   std::fprintf(stderr, "WidgetType: unknown '%s', using fallback\n", s.c_str());
   return fallback;
 }

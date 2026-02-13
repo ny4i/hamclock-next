@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL2/SDL.h>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,12 @@ public:
     return false;
   }
 
+  // Called on mouse move. Check if handled.
+  virtual void onMouseMove(int mx, int my) {
+    (void)mx;
+    (void)my;
+  }
+
   // Called on keyboard/text events. Returns true if consumed.
   virtual bool onKeyDown(SDL_Keycode key, Uint16 mod) {
     (void)key;
@@ -51,6 +58,7 @@ public:
 
   virtual bool isModalActive() const { return false; }
   virtual void renderModal(SDL_Renderer *renderer) { (void)renderer; }
+  virtual void setMetric(bool metric) { useMetric_ = metric; }
 
   // Semantic Debug API
   virtual std::string getName() const { return "Widget"; }
@@ -59,6 +67,7 @@ public:
     (void)action;
     return {0, 0, 0, 0};
   }
+  virtual nlohmann::json getDebugData() const { return {}; }
 
 protected:
   int x_;
@@ -66,4 +75,5 @@ protected:
   int width_;
   int height_;
   std::string theme_ = "default";
+  bool useMetric_ = true;
 };

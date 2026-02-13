@@ -1,13 +1,16 @@
 #include "HistoryPanel.h"
 #include "../core/Theme.h"
+#include "RenderUtils.h"
 #include <SDL2/SDL.h>
 #include <algorithm>
+#include <vector>
 
 HistoryPanel::HistoryPanel(int x, int y, int w, int h, FontManager &fontMgr,
+                           TextureManager &texMgr,
                            std::shared_ptr<HistoryStore> store,
                            const std::string &seriesName)
-    : Widget(x, y, w, h), fontMgr_(fontMgr), store_(std::move(store)),
-      seriesName_(seriesName) {}
+    : Widget(x, y, w, h), fontMgr_(fontMgr), texMgr_(texMgr),
+      store_(std::move(store)), seriesName_(seriesName) {}
 
 void HistoryPanel::update() { currentSeries_ = store_->get(seriesName_); }
 
@@ -64,7 +67,7 @@ void HistoryPanel::render(SDL_Renderer *renderer) {
 
   if (seriesName_ == "kp") {
     // Bar chart for Kp
-    float barW = (float)graphW / 30.0f;
+    float barW = (float)graphW / (float)n;
     for (int i = 0; i < n; ++i) {
       float val = currentSeries_.points[i].value;
       int bh = (int)((val / 9.0f) * graphH);
@@ -80,18 +83,32 @@ void HistoryPanel::render(SDL_Renderer *renderer) {
 
       SDL_RenderFillRect(renderer, &bar);
     }
+
+    // Kp Legend
+    const char *labels[] = {"0", "4", "5", "9"};
+    float vals[] = {0, 4, 5, 9};
+    for (int i = 0; i < 4; ++i) {
+      int ly = graphY + graphH - (int)((vals[i] / 9.0f) * graphH);
+      fontMgr_.drawText(renderer, labels[i], graphX - 2, ly, themes.textDim, 8,
+                        false, true);
+    }
   } else {
-    // Line chart for Flux and SSN
-    SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
-    for (int i = 0; i < n - 1; ++i) {
-      float v1 = currentSeries_.points[i].value;
-      float v2 = currentSeries_.points[i + 1].value;
+    // Line chart for Flux and SSN (Anti-Aliased)
+    SDL_Texture *lineTex = texMgr_.get("line_aa");
+    std::vector<SDL_FPoint> pts;
+    pts.reserve(n);
+    for (int i = 0; i < n; ++i) {
+      float val = currentSeries_.points[i].value;
+      float py = graphY + graphH - ((val - minV) / range) * graphH;
+      pts.push_back({graphX + i * stepX, py});
+    }
 
-      int y1 = graphY + graphH - (int)(((v1 - minV) / range) * graphH);
-      int y2 = graphY + graphH - (int)(((v2 - minV) / range) * graphH);
-
-      SDL_RenderDrawLine(renderer, (int)(graphX + i * stepX), y1,
-                         (int)(graphX + (i + 1) * stepX), y2);
+    if (lineTex) {
+      RenderUtils::drawPolylineTextured(renderer, lineTex, pts.data(), n, 2.0f,
+                                        {255, 255, 0, 255});
+    } else {
+      RenderUtils::drawPolyline(renderer, pts.data(), n, 1.5f,
+                                {255, 255, 0, 255});
     }
 
     // Show current value

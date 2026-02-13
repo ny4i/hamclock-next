@@ -49,7 +49,7 @@ private:
   FontManager &fontMgr_;
 
   // Tabs
-  enum class Tab { Identity, DXCluster, Appearance, Widgets };
+  enum class Tab { Identity, Spotting, Appearance, Widgets };
   Tab activeTab_ = Tab::Identity;
 
   // Identity Fields
@@ -58,12 +58,16 @@ private:
   std::string latText_;
   std::string lonText_;
 
-  // Network Fields
+  // Spotting Fields (DX Cluster & PSK Reporter)
   std::string clusterHost_;
   std::string clusterPort_;
   std::string clusterLogin_;
   bool clusterEnabled_ = true;
   bool clusterWSJTX_ = false;
+
+  bool pskOfDe_ = true;    // Sender/Receiver mode
+  bool pskUseCall_ = true; // Use Call/Grid
+  int pskMaxAge_ = 30;     // Minutes
 
   // Appearance
   int rotationInterval_ = 30;
@@ -71,6 +75,8 @@ private:
   SDL_Color callsignColor_ = {255, 165, 0, 255};
   std::string panelMode_ = "dx";
   std::string selectedSatellite_;
+  bool mapNightLights_ = true;
+  bool useMetric_ = true;
 
   // Widgets
   std::vector<WidgetType> paneRotations_[4];
@@ -101,7 +107,11 @@ private:
   int hintSize_ = 14;
   SDL_Rect toggleRect_ = {0, 0, 0, 0};
   SDL_Rect clusterToggleRect_ = {0, 0, 0, 0};
+  SDL_Rect pskOfDeRect_ = {0, 0, 0, 0};
+  SDL_Rect pskUseCallRect_ = {0, 0, 0, 0};
   SDL_Rect themeRect_ = {0, 0, 0, 0};
+  SDL_Rect nightLightsRect_ = {0, 0, 0, 0};
+  SDL_Rect metricToggleRect_ = {0, 0, 0, 0};
 
   // Row of widget rects for current pane
   struct WidgetClickRect {
