@@ -419,7 +419,6 @@ void SetupScreen::renderTabWidgets(SDL_Renderer *renderer, int cx, int pad,
   int colW = fieldW / 2;
   int curX = fieldX;
   int startY = y;
-  int rowH = hintSize_ + 6;
 
   WidgetType allTypes[] = {
       WidgetType::SOLAR,        WidgetType::DX_CLUSTER,
@@ -434,9 +433,17 @@ void SetupScreen::renderTabWidgets(SDL_Renderer *renderer, int cx, int pad,
       WidgetType::AURORA,       WidgetType::ADIF,
       WidgetType::COUNTDOWN};
 
+  int totalItems = static_cast<int>(sizeof(allTypes) / sizeof(allTypes[0]));
+  int leftColCount = (totalItems + 1) / 2;
+
+  // Compute row height to fit within available space above footer buttons
+  int footerY = y_ + height_ - std::max(16, width_ / 24) - 40;
+  int availableH = footerY - startY - 10;
+  int rowH = std::min(hintSize_ + 6, availableH / leftColCount);
+
   const auto &currentPane = paneRotations_[activePane_];
 
-  for (size_t i = 0; i < sizeof(allTypes) / sizeof(allTypes[0]); ++i) {
+  for (int i = 0; i < totalItems; ++i) {
     WidgetType t = allTypes[i];
     SDL_Rect r = {curX, y, 16, 16};
     SDL_SetRenderDrawColor(renderer, 50, 50, 60, 255);
@@ -458,7 +465,7 @@ void SetupScreen::renderTabWidgets(SDL_Renderer *renderer, int cx, int pad,
     widgetRects_.push_back({t, r});
 
     y += rowH;
-    if (i == 10) {
+    if (i == leftColCount - 1) {
       y = startY;
       curX += colW;
     }
